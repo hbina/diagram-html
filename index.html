@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Offline flowchart editor and SVG visualizer. No libraries or network requests.">
+  <title>Flowchart · Offline</title>
+  <style>
+    :root {
+      font-family: system-ui, sans-serif;
+      color: #dce5f3;
+      background: #10141c;
+      color-scheme: dark
+    }
+
+    * {
+      box-sizing: border-box
+    }
+
+    body {
+      margin: 0;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column
+    }
+
+    header {
+      padding: 16px 22px;
+      border-bottom: 1px solid #30394b;
+      display: flex;
+      align-items: center;
+      gap: 14px
+    }
+
+    h1 {
+      font-size: 19px;
+      margin: 0;
+      font-weight: 650
+    }
+
+    .badge {
+      font-size: 11px;
+      color: #89ddbc;
+      border: 1px solid #365e51;
+      padding: 4px 8px;
+      border-radius: 20px
+    }
+
+    header p {
+      margin: 0 0 0 auto;
+      color: #9faec2;
+      font-size: 13px
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(260px, 350px) 1fr;
+      flex: 1;
+      min-height: 0
+    }
+
+    .editor {
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #30394b;
+      min-height: 0;
+      background: #171e29
+    }
+
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid #30394b
+    }
+
+    label {
+      font-size: 13px;
+      font-weight: 600
+    }
+
+    button,
+    .file {
+      border: 1px solid #435069;
+      background: #222d3e;
+      color: #e3ecf9;
+      padding: 7px 11px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px
+    }
+
+    button:hover,
+    .file:hover {
+      background: #33435c
+    }
+
+    button:focus-visible,
+    .file:focus-within,
+    summary:focus-visible {
+      outline: 2px solid #8ab9ff;
+      outline-offset: 2px
+    }
+
+    button.primary {
+      background: #8cb9ff;
+      color: #101e33;
+      border-color: #8cb9ff;
+      font-weight: 650
+    }
+
+    button:disabled {
+      opacity: .4;
+      cursor: default
+    }
+
+    textarea {
+      flex: 1;
+      min-height: 170px;
+      resize: none;
+      border: 0;
+      outline: none;
+      background: transparent;
+      color: #d2dff2;
+      padding: 16px;
+      font: 12px/1.65 ui-monospace, monospace;
+      tab-size: 2
+    }
+
+    textarea:focus {
+      box-shadow: inset 0 0 0 1px #718fb7
+    }
+
+    .editor footer {
+      padding: 10px 14px;
+      color: #9faec2;
+      font-size: 11px;
+      border-top: 1px solid #30394b
+    }
+
+    details {
+      font-size: 12px;
+      line-height: 1.6;
+      border-top: 1px solid #30394b;
+      padding: 12px 14px;
+      color: #b9c8dc
+    }
+
+    summary {
+      cursor: pointer;
+      color: #dce5f3
+    }
+
+    details p {
+      margin: 8px 0
+    }
+
+    code {
+      color: #b9d4ff
+    }
+
+    .preview {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0
+    }
+
+    .preview .bar {
+      background: #171e29
+    }
+
+    #zoomLabel {
+      min-width: 50px;
+      text-align: center;
+      font-size: 12px;
+      color: #adbed5
+    }
+
+    #status {
+      margin-left: auto;
+      font-size: 12px;
+      color: #a9b9ce
+    }
+
+    #viewport {
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+      background-color: #10141c;
+      background-image: radial-gradient(#344052 1px, transparent 1px);
+      background-size: 20px 20px;
+      touch-action: none;
+      cursor: grab
+    }
+
+    #viewport:active {
+      cursor: grabbing
+    }
+
+    #error {
+      margin: 0;
+      padding: 12px 16px;
+      border-bottom: 1px solid #8c4b4b;
+      background: #3c222b;
+      color: #ffd0d0;
+      font: 12px/1.5 ui-monospace, monospace;
+      white-space: pre-wrap;
+      max-height: 160px;
+      overflow: auto
+    }
+
+    #error[hidden] {
+      display: none
+    }
+
+    .hint {
+      font-size: 11px;
+      color: #9faec2;
+      padding: 8px 12px;
+      border-top: 1px solid #30394b;
+      background: #171e29
+    }
+
+    .spacer {
+      flex: 1
+    }
+
+    .file {
+      display: inline-block;
+      font-weight: 400
+    }
+
+    .file input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0
+    }
+
+    @media(max-width:700px) {
+      header {
+        padding: 12px
+      }
+
+      header p {
+        display: none
+      }
+
+      main {
+        grid-template-columns: 1fr;
+        grid-template-rows: 42% 58%
+      }
+
+      .editor {
+        border-right: 0;
+        border-bottom: 1px solid #30394b
+      }
+
+      textarea {
+        min-height: 60px
+      }
+
+      details {
+        max-height: 110px;
+        overflow: auto
+      }
+
+      .editor footer {
+        display: none
+      }
+
+      .bar {
+        padding: 8px
+      }
+
+      #status {
+        width: 100%;
+        margin-left: 0
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Flowchart</h1><span class="badge">OFFLINE · NO DEPENDENCIES</span>
+    <p>Text in. Diagram out.</p>
+  </header>
+  <main>
+    <section class="editor" aria-label="Flowchart editor">
+      <div class="bar"><label for="source">Source</label><span class="spacer"></span><label class="file">Open file<input
+            id="file" type="file" accept=".mmd,.mermaid,.txt,text/plain"></label><button id="saveSource">Save
+          text</button></div>
+      <textarea id="source" spellcheck="false" aria-describedby="syntaxHelp"></textarea>
+      <div class="bar"><button class="primary" id="render">Render</button><button id="cancel"
+          disabled>Cancel</button><span class="spacer"></span><button id="example">Example</button></div>
+      <details id="syntaxHelp">
+        <summary>Supported syntax &amp; limits</summary>
+        <p>A custom flowchart parser, supporting a subset of Mermaid syntax. No Mermaid library is used.</p>
+        <p><code>flowchart LR</code> or <code>graph TB</code>; directions LR, RL, TB, TD, BT. Nodes:
+          <code>a[Label]</code>, <code>a("Label")</code>, <code>a{Decision}</code>, or bare IDs. Edges:
+          <code>a --&gt; b</code>, <code>a --&gt;|label| b</code>, <code>a --- b</code>, <code>a -. select .-&gt; b</code>, <code>a -.-&gt;|label| b</code>, <code>a -.- b</code>; chains are accepted. Separate
+          statements with newlines or semicolons. IDs use letters, numbers, underscores or hyphens.</p>
+        <p><code>%%</code> comments and a leading YAML header with <code>maxEdges</code> / <code>maxTextSize</code> are
+          accepted. Other header entries are ignored. Labels are plain text; quoted labels can contain punctuation. Node labels support <code>&lt;br/&gt;</code> line breaks.
+          Subgraphs, styling directives and other diagram types are unsupported and report errors.</p>
+        <p>Defaults: 20,000 edges, 1,000,000 source characters. Layout uses layers, including cycle grouping. Dense
+          graphs may have overlapping edges; rendering time depends on graph size and your device. Text stays in your
+          browser. Nothing is sent or stored automatically.</p>
+      </details>
+      <footer>Ctrl / ⌘ + Enter to render</footer>
+    </section>
+    <section class="preview" aria-label="Diagram preview">
+      <div class="bar"><button id="fit" disabled>Fit</button><button id="minus" disabled
+          aria-label="Zoom out">−</button><span id="zoomLabel">100%</span><button id="plus" disabled
+          aria-label="Zoom in">+</button><button id="actual" disabled>100%</button><button id="export" disabled>Save
+          SVG</button><span id="status" role="status" aria-live="polite">Ready</span></div>
+      <pre id="error" role="alert" hidden></pre>
+      <svg id="viewport" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Flowchart preview" tabindex="0">
+        <g id="scene"></g>
+      </svg>
+      <div class="hint">Drag to pan · Scroll to zoom · Arrow keys to pan · + / − to zoom · F to fit</div>
+    </section>
+  </main>
+  <script>
+    'use strict';
+    // This function is also the worker program. It has no dependencies on the page.
+    function buildGraph(source) {
+      function fail(line, message) { throw new Error('Line ' + line + ': ' + message); }
+      let maxEdges = 20000, maxTextSize = 1000000;
+      const lines = source.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n');
+      let first = 0;
+      while (first < lines.length && !lines[first].trim()) first++;
+      if (lines[first]?.trim() === '---') {
+        let end = first + 1;
+        for (; end < lines.length && lines[end].trim() !== '---'; end++) {
+          const m = lines[end].match(/^\s*(maxEdges|maxTextSize)\s*:\s*(\d+)\s*(?:#.*)?$/);
+          if (m) {
+            const value = Number(m[2]);
+            if (!Number.isSafeInteger(value) || value < 1) fail(end + 1, 'Limit must be a positive integer.');
+            if (m[1] === 'maxEdges') maxEdges = value; else maxTextSize = value;
+          }
+        }
+        if (end === lines.length) fail(first + 1, 'Unclosed configuration header.');
+        first = end + 1;
+      }
+      if (source.length > maxTextSize) throw new Error('Source exceeds maxTextSize (' + maxTextSize + ').');
+      const nodes = [], edges = [], ids = new Map();
+      let direction = null;
+      function node(id, label, shape) {
+        if (!ids.has(id)) { ids.set(id, nodes.length); nodes.push({ id, label: id, shape: 'rect' }); }
+        const index = ids.get(id);
+        if (label !== undefined) Object.assign(nodes[index], { label, shape });
+        return index;
+      }
+      for (let li = first; li < lines.length; li++) {
+        const text = lines[li]; let p = 0;
+        const skip = () => { while (/\s/.test(text[p] || '') && p < text.length) p++; };
+        skip(); if (!text.slice(p) || text.startsWith('%%', p)) continue;
+        if (!direction) {
+          const h = text.slice(p).match(/^(?:flowchart|graph)\s+(LR|RL|TB|TD|BT)\s*(?=;|%%|$)/);
+          if (!h) fail(li + 1, 'Expected flowchart LR (or RL, TB, TD, BT).');
+          direction = h[1] === 'TD' ? 'TB' : h[1]; p += h[0].length;
+        }
+        function readLabel(close) {
+          skip(); let result = '';
+          if (text[p] === '"') {
+            p++; let closed = false;
+            while (p < text.length) {
+              if (text[p] === '\\' && (text[p + 1] === '"' || text[p + 1] === '\\')) { result += text[p + 1]; p += 2; }
+              else if (text[p] === '"') { p++; closed = true; break; }
+              else result += text[p++];
+            }
+            if (!closed) fail(li + 1, 'Unclosed quoted label.');
+            skip();
+          } else {
+            const start = p;
+            while (p < text.length && text[p] !== close) p++;
+            result = text.slice(start, p).trim();
+          }
+          if (text[p] !== close) fail(li + 1, 'Expected ' + close + ' after label.');
+          p++; return result;
+        }
+        function readNode() {
+          skip(); const m = text.slice(p).match(/^[A-Za-z0-9_]+(?:-(?!->)[A-Za-z0-9_]+)*/);
+          if (!m) fail(li + 1, 'Expected node ID near ' + text.slice(p, p + 40));
+          const id = m[0]; p += id.length; skip();
+          const opening = text[p], close = { '[': ']', '(': ')', '{': '}' }[opening];
+          if (close) { p++; return node(id, readLabel(close), opening === '(' ? 'round' : opening === '{' ? 'diamond' : 'rect'); }
+          return node(id);
+        }
+        while (p < text.length) {
+          skip(); if (text.startsWith('%%', p)) break;
+          if (text[p] === ';') { p++; continue; }
+          let from = readNode(); skip();
+          while (text.startsWith('-->', p) || text.startsWith('---', p) || text.startsWith('-.', p)) {
+            let arrow = true, dotted = false, label = '';
+            if (text.startsWith('-.' , p)) {
+              dotted = true;
+              if (text.startsWith('-.->', p)) p += 4;
+              else if (text.startsWith('-.-', p)) { arrow = false; p += 3; }
+              else {
+                // Mermaid-style dotted edges can enclose a plain text label.
+                const match = text.slice(p).match(/^-\.\s+(.+?)\s+\.(->|-)/);
+                if (!match) fail(li + 1, 'Expected dotted edge: -.-> or -. label .->');
+                label = match[1].trim(); arrow = match[2] === '->'; p += match[0].length;
+              }
+            } else { arrow = text.startsWith('-->', p); p += 3; }
+            skip();
+            if (text[p] === '|') {
+              if (label) fail(li + 1, 'Use either an inline label or a |label| on an edge.');
+              p++; const end = text.indexOf('|', p); if (end < 0) fail(li + 1, 'Unclosed edge label.'); label = text.slice(p, end); p = end + 1;
+            }
+            const to = readNode(); edges.push({ from, to, label, arrow, dotted });
+            if (edges.length > maxEdges) fail(li + 1, 'Edge count exceeds maxEdges (' + maxEdges + ').');
+            from = to; skip();
+          }
+          if (p < text.length && text[p] !== ';' && !text.startsWith('%%', p)) fail(li + 1, 'Unsupported syntax near ' + text.slice(p, p + 60));
+        }
+      }
+      if (!direction || !nodes.length) throw new Error('Enter a flowchart header and at least one node.');
+      // Iterative Kosaraju groups cycles without exhausting the call stack.
+      const n = nodes.length, out = Array.from({ length: n }, () => []), incoming = Array.from({ length: n }, () => []);
+      for (const e of edges) { out[e.from].push(e.to); incoming[e.to].push(e.from); }
+      const seen = new Uint8Array(n), finish = [];
+      for (let i = 0; i < n; i++) {
+        if (seen[i]) continue;
+        seen[i] = 1; const stack = [[i, 0]];
+        while (stack.length) {
+          const top = stack[stack.length - 1], adjacent = out[top[0]];
+          if (top[1] < adjacent.length) { const v = adjacent[top[1]++]; if (!seen[v]) { seen[v] = 1; stack.push([v, 0]); } }
+          else { finish.push(top[0]); stack.pop(); }
+        }
+      }
+      const component = new Int32Array(n).fill(-1); let count = 0;
+      for (let k = finish.length - 1; k >= 0; k--) {
+        const v = finish[k]; if (component[v] !== -1) continue;
+        const stack = [v]; component[v] = count;
+        while (stack.length) { const u = stack.pop(); for (const w of incoming[u]) if (component[w] === -1) { component[w] = count; stack.push(w); } }
+        count++;
+      }
+      const successors = Array.from({ length: count }, () => new Set()), indegree = new Int32Array(count), ranks = new Int32Array(count);
+      for (const e of edges) { const a = component[e.from], b = component[e.to]; if (a !== b && !successors[a].has(b)) { successors[a].add(b); indegree[b]++; } }
+      const queue = []; for (let c = 0; c < count; c++) if (!indegree[c]) queue.push(c);
+      for (let q = 0; q < queue.length; q++) { const c = queue[q]; for (const d of successors[c]) { ranks[d] = Math.max(ranks[d], ranks[c] + 1); if (!--indegree[d]) queue.push(d); } }
+      const layers = [];
+      nodes.forEach((v, i) => { v.rank = ranks[component[i]]; (layers[v.rank] ||= []).push(i); });
+      const order = new Float64Array(n); layers.forEach(layer => layer.forEach((v, i) => order[v] = i));
+      for (let pass = 0; pass < 4; pass++) {
+        const forward = pass % 2 === 0;
+        for (let step = 0; step < layers.length; step++) {
+          const r = forward ? step : layers.length - 1 - step, layer = layers[r], scores = new Map();
+          for (const v of layer) { const neighbors = (forward ? incoming[v] : out[v]).filter(w => forward ? nodes[w].rank < r : nodes[w].rank > r); scores.set(v, neighbors.length ? neighbors.reduce((sum, w) => sum + order[w], 0) / neighbors.length : order[v]); }
+          layer.sort((a, b) => scores.get(a) - scores.get(b) || a - b); layer.forEach((v, i) => order[v] = i);
+        }
+      }
+      function wrap(label) {
+        const result = [];
+        for (const paragraph of label.split(/<br\s*\/?\s*>|\\n/i)) {
+          let rest = paragraph;
+          while (rest.length > 28) { let cut = rest.lastIndexOf(' ', 28); if (cut < 8) cut = 28; result.push(rest.slice(0, cut)); rest = rest.slice(cut).trimStart(); }
+          result.push(rest);
+        }
+        return result;
+      }
+      const horizontal = direction === 'LR' || direction === 'RL';
+      for (const v of nodes) { v.lines = wrap(v.label); v.w = 240; v.h = Math.max(64, v.lines.length * 17 + 28); if (v.shape === 'diamond') { v.w = 300; v.h *= 1.65; } }
+      const layerSizes = layers.map(layer => ({ depth: layer.reduce((m, i) => Math.max(m, horizontal ? nodes[i].w : nodes[i].h), 0), breadth: layer.reduce((sum, i) => sum + (horizontal ? nodes[i].h : nodes[i].w) + 32, 0) - 32 }));
+      const breadth = layerSizes.reduce((m, s) => Math.max(m, s.breadth), 0);
+      let depth = 40;
+      layers.forEach((layer, r) => { let b = 40 + (breadth - layerSizes[r].breadth) / 2; for (const i of layer) { const v = nodes[i]; v.x = horizontal ? depth : b; v.y = horizontal ? b : depth; b += (horizontal ? v.h : v.w) + 32; } depth += layerSizes[r].depth + 150; });
+      const width = horizontal ? depth - 110 : breadth + 80, height = horizontal ? breadth + 80 : depth - 110;
+      for (const v of nodes) { if (direction === 'RL') v.x = width - v.x - v.w; if (direction === 'BT') v.y = height - v.y - v.h; }
+      return { nodes, edges, direction, width, height };
+    }
+    const $ = id => document.getElementById(id), source = $('source'), viewport = $('viewport'), scene = $('scene');
+    const NS = 'http://www.w3.org/2000/svg';
+    let worker = null, current = null, version = 0, view = { x: 0, y: 0, scale: 1 }, drag = null;
+    const example = `---
+config:
+  maxEdges: 20000
+  maxTextSize: 1000000
+---
+flowchart LR
+  %% A small expression graph
+  n8["i_instruction / 32 bits"]
+  n10["slice offset 28 / 4 bits"]
+  n13["constant 1 / 4 bits"]
+  n14["Eq / 1 bits"]
+  n5["i_scratch / 64 bits"]
+  n101["constant 1 / 64 bits"]
+  n112["MUX / 64 bits"]
+  out0["o_next_scratch / 64 bits"]
+  n8 -->|value| n10
+  n10 -->|lhs| n14
+  n13 -->|rhs| n14
+  n14 -->|select| n112
+  n5 -->|true| n112
+  n101 -->|false| n112
+  n112 --> out0`;
+    source.value = example;
+    function el(tag, attrs = {}, text) { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text !== undefined) e.textContent = text; return e; }
+    function error(message) { $('error').textContent = message; $('error').hidden = false; }
+    function busy(value) { $('render').disabled = value; $('cancel').disabled = !value; }
+    function updateView() { scene.setAttribute('transform', `translate(${view.x} ${view.y}) scale(${view.scale})`); $('zoomLabel').textContent = (view.scale * 100 < 1 ? (view.scale * 100).toFixed(2) : Math.round(view.scale * 100)) + '%'; }
+    function fit() { if (!current) return; const box = viewport.getBoundingClientRect(); view.scale = Math.min((box.width - 40) / current.width, (box.height - 40) / current.height, 1); view.scale = Math.max(view.scale, 0.000001); view.x = (box.width - current.width * view.scale) / 2; view.y = (box.height - current.height * view.scale) / 2; updateView(); }
+    function zoom(factor, x = viewport.clientWidth / 2, y = viewport.clientHeight / 2) { if (!current) return; const scale = Math.min(8, Math.max(.000001, view.scale * factor)); view.x = x - (x - view.x) * scale / view.scale; view.y = y - (y - view.y) * scale / view.scale; view.scale = scale; updateView(); }
+    function draw(graph) {
+      const fragment = document.createDocumentFragment(), defs = el('defs'), marker = el('marker', { id: 'arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
+      marker.append(el('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#849bb9' })); defs.append(marker); fragment.append(defs);
+      const edgeGroup = el('g', { fill: 'none', stroke: '#637c9c', 'stroke-width': 1.4 }), labels = el('g'), nodeGroup = el('g');
+      const horizontal = graph.direction === 'LR' || graph.direction === 'RL', reverse = graph.direction === 'RL' || graph.direction === 'BT';
+      graph.edges.forEach(e => {
+        const a = graph.nodes[e.from], b = graph.nodes[e.to]; let sx, sy, tx, ty, d, lx, ly;
+        if (e.from === e.to) { sx = a.x + a.w; sy = a.y + a.h * .3; tx = sx; ty = a.y + a.h * .7; d = `M${sx},${sy} C${sx + 70},${sy - 50} ${tx + 70},${ty + 50} ${tx},${ty}`; lx = sx + 52; ly = (sy + ty) / 2; }
+        else if (a.rank === b.rank) { sx = a.x + a.w; sy = a.y + a.h / 2; tx = b.x + b.w; ty = b.y + b.h / 2; const bend = Math.max(sx, tx) + 70; d = `M${sx},${sy} C${bend},${sy} ${bend},${ty} ${tx},${ty}`; lx = bend - 15; ly = (sy + ty) / 2; }
+        else if (horizontal) { sx = a.x + (reverse ? 0 : a.w); sy = a.y + a.h / 2; tx = b.x + (reverse ? b.w : 0); ty = b.y + b.h / 2; const mid = (sx + tx) / 2; d = `M${sx},${sy} C${mid},${sy} ${mid},${ty} ${tx},${ty}`; lx = mid; ly = (sy + ty) / 2; }
+        else { sx = a.x + a.w / 2; sy = a.y + (reverse ? 0 : a.h); tx = b.x + b.w / 2; ty = b.y + (reverse ? b.h : 0); const mid = (sy + ty) / 2; d = `M${sx},${sy} C${sx},${mid} ${tx},${mid} ${tx},${ty}`; lx = (sx + tx) / 2; ly = mid; }
+        const path = el('path', { d }); if (e.dotted) path.setAttribute('stroke-dasharray', '5 5'); if (e.arrow) path.setAttribute('marker-end', 'url(#arrow)'); edgeGroup.append(path);
+        if (e.label) labels.append(el('text', { x: lx, y: ly - 6, fill: '#c3d5ec', 'font-size': 11, 'text-anchor': 'middle', stroke: '#10141c', 'stroke-width': 4, 'paint-order': 'stroke', 'stroke-linejoin': 'round' }, e.label));
+      });
+      for (const v of graph.nodes) {
+        const g = el('g'); g.append(el('title', {}, v.id + ': ' + v.label));
+        const attrs = { fill: '#202f44', stroke: '#87a9d7', 'stroke-width': 1.3 };
+        if (v.shape === 'diamond') g.append(el('polygon', { ...attrs, points: `${v.x + v.w / 2},${v.y} ${v.x + v.w},${v.y + v.h / 2} ${v.x + v.w / 2},${v.y + v.h} ${v.x},${v.y + v.h / 2}` }));
+        else g.append(el('rect', { ...attrs, x: v.x, y: v.y, width: v.w, height: v.h, rx: v.shape === 'round' ? 24 : 7 }));
+        const text = el('text', { x: v.x + v.w / 2, y: v.y + v.h / 2 - (v.lines.length - 1) * 8.5 + 4, fill: '#e2ecfa', 'font-size': 13, 'text-anchor': 'middle' });
+        v.lines.forEach((line, i) => text.append(el('tspan', { x: v.x + v.w / 2, dy: i ? 17 : 0 }, line))); g.append(text); nodeGroup.append(g);
+      }
+      fragment.append(edgeGroup, labels, nodeGroup); scene.replaceChildren(fragment);
+      current = graph; for (const id of ['fit', 'minus', 'plus', 'actual', 'export']) $(id).disabled = false;
+      fit();
+    }
+    function stop() { version++; if (worker) worker.terminate(); worker = null; busy(false); }
+    function render() {
+      stop(); const token = version, started = performance.now(); $('error').hidden = true; busy(true); $('status').textContent = 'Parsing and laying out…';
+      const program = 'const buildGraph=' + buildGraph.toString() + ';onmessage=e=>{try{postMessage({graph:buildGraph(e.data)})}catch(err){postMessage({error:err.message})}}';
+      const url = URL.createObjectURL(new Blob([program], { type: 'text/javascript' }));
+      try { worker = new Worker(url); } catch (err) { URL.revokeObjectURL(url); busy(false); error('Could not start the layout worker: ' + err.message); $('status').textContent = 'Render failed'; return; }
+      URL.revokeObjectURL(url);
+      worker.onmessage = e => {
+        if (token !== version) return; worker.terminate(); worker = null;
+        if (e.data.error) { busy(false); error(e.data.error); $('status').textContent = current ? 'Render failed · previous diagram shown' : 'Render failed'; return; }
+        $('status').textContent = 'Drawing…';
+        if (token !== version) return; try { draw(e.data.graph); $('status').textContent = `${current.nodes.length.toLocaleString()} nodes · ${current.edges.length.toLocaleString()} edges · ${((performance.now() - started) / 1000).toFixed(2)}s`; } catch (err) { error(err.message); $('status').textContent = 'Drawing failed'; } finally { busy(false); }
+      };
+      worker.onerror = e => { if (token !== version) return; stop(); error(e.message || 'Worker failed.'); $('status').textContent = 'Render failed'; };
+      worker.postMessage(source.value);
+    }
+    $('render').onclick = render; $('cancel').onclick = () => { stop(); $('status').textContent = current ? 'Cancelled · previous diagram shown' : 'Cancelled'; };
+    $('example').onclick = () => { source.value = example; render(); };
+    source.addEventListener('input', () => { stop(); $('status').textContent = 'Source changed · render to update'; });
+    source.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); render(); } });
+    $('file').onchange = async e => { const file = e.target.files[0]; if (!file) return; stop(); try { source.value = await file.text(); $('status').textContent = 'File loaded · render to update'; $('error').hidden = true; } catch (err) { error('Could not read file: ' + err.message); } e.target.value = ''; };
+    function download(text, type, name) { const url = URL.createObjectURL(new Blob([text], { type })), a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+    $('saveSource').onclick = () => download(source.value, 'text/plain;charset=utf-8', 'diagram.mmd');
+    $('export').onclick = () => { if (!current) return; const svg = el('svg', { xmlns: NS, viewBox: `-50 -50 ${current.width + 150} ${current.height + 150}`, width: current.width + 150, height: current.height + 150, 'font-family': 'system-ui, sans-serif' }); svg.append(el('rect', { x: -50, y: -50, width: current.width + 150, height: current.height + 150, fill: '#10141c' })); const clone = scene.cloneNode(true); clone.removeAttribute('transform'); svg.append(clone); download(new XMLSerializer().serializeToString(svg), 'image/svg+xml;charset=utf-8', 'diagram.svg'); };
+    $('fit').onclick = fit; $('plus').onclick = () => zoom(1.3); $('minus').onclick = () => zoom(1 / 1.3); $('actual').onclick = () => zoom(1 / view.scale);
+    viewport.addEventListener('wheel', e => { e.preventDefault(); const box = viewport.getBoundingClientRect(); zoom(Math.exp(-Math.max(-100, Math.min(100, e.deltaY)) * .002), e.clientX - box.left, e.clientY - box.top); }, { passive: false });
+    viewport.addEventListener('pointerdown', e => { if (e.button !== 0) return; drag = { id: e.pointerId, x: e.clientX, y: e.clientY }; viewport.setPointerCapture(e.pointerId); });
+    viewport.addEventListener('pointermove', e => { if (!drag || e.pointerId !== drag.id) return; view.x += e.clientX - drag.x; view.y += e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY; updateView(); });
+    for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) viewport.addEventListener(name, () => drag = null);
+    viewport.addEventListener('keydown', e => { const delta = { ArrowLeft: [40, 0], ArrowRight: [-40, 0], ArrowUp: [0, 40], ArrowDown: [0, -40] }[e.key]; if (delta) { e.preventDefault(); view.x += delta[0]; view.y += delta[1]; updateView(); } else if (e.key === '+' || e.key === '=') { e.preventDefault(); zoom(1.3); } else if (e.key === '-') { e.preventDefault(); zoom(1 / 1.3); } else if (e.key.toLowerCase() === 'f') { e.preventDefault(); fit(); } });
+    window.addEventListener('resize', () => { if (current) fit(); });
+    render();
+  </script>
+</body>
+
+</html>
