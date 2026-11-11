@@ -1,0 +1,32 @@
+flowchart TD
+  A["A: RX parsing, channel/sequence checks"] --> B["B: Token lookup"]
+  B --> C["C: Market cache and revision capture"]
+  C --> D["D: Ordered rule expansion"]
+  D --> E["E: One multicycle evaluator"]
+  E --> F["F: First eligible match and proposal"]
+  F --> G["G: Local risk and atomic commitment"]
+  G --> HP["H: Request preparation"]
+  HP --> HB["H: Session binding"]
+  HB --> I["I: Encoding and AES-GCM"]
+  I --> J["J: Coherent payload CDC"]
+  J --> K["K: TCP and final send authority"]
+  K --> L["L: MAC frame and word output"]
+
+  G -. "registered view/publication" .-> INV["Inventory publication owner"]
+  INV -. "registered snapshot" .-> C
+  HP -. "owned query" .-> G
+  L -. "retained physical facts" .-> K
+  K -. "coherent completion" .-> DONE["Accounting / lease return owners"]
+  DONE -. "actual accounting and release" .-> G
+  DONE -. "tagged resolution" .-> F
+  RX["Authenticated receive and retirement owners"] -. "outcomes / proofs" .-> G
+  RX -. "binding queries / cleanup" .-> HB
+  RX -. "registered scoped protocol control" .-> K
+  CPU["CPU command owners"] -. "registered commands / actual replies" .-> A
+  CPU -. "token configuration" .-> B
+  CPU -. "definitions" .-> D
+  CPU -. "selection arm" .-> F
+  CPU -. "authorization / mutation" .-> G
+  CPU -. "profiles" .-> HP
+  CPU -. "session configuration" .-> HB
+  CPU -. "coherent control CDC" .-> K
