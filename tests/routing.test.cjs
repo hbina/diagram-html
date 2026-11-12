@@ -2,10 +2,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-new vm.Script(script);
-const buildGraph = vm.runInNewContext(script.slice(0, script.indexOf('    const $ =')) + '\nbuildGraph;');
+const { buildGraph } = require('../index.js');
+const script = fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8');
 const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/owner-flowchart.mmd'), 'utf8');
 const bidirectionalFixture = fs.readFileSync(path.join(__dirname, 'fixtures/bidirectional-flowchart.mmd'), 'utf8');
 let checked = 0;
@@ -79,7 +77,7 @@ function element(tag, attrs = {}) {
   elements.push(result);
   return result;
 }
-const draw = vm.runInNewContext(script.slice(script.indexOf('    function draw('), script.indexOf('    function stop(')) + '\ndraw;', {
+const draw = vm.runInNewContext(script.slice(script.indexOf('  function draw('), script.indexOf('  function stop(')) + '\ndraw;', {
   document: { createDocumentFragment: () => element('fragment') }, el: element,
   scene: { replaceChildren() {} }, $: () => ({}), selectNode() {}, fit() {}, selectedId: null
 });
