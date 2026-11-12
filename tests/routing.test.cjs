@@ -7,6 +7,7 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 new vm.Script(script);
 const buildGraph = vm.runInNewContext(script.slice(0, script.indexOf('    const $ =')) + '\nbuildGraph;');
 const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/owner-flowchart.mmd'), 'utf8');
+const bidirectionalFixture = fs.readFileSync(path.join(__dirname, 'fixtures/bidirectional-flowchart.mmd'), 'utf8');
 let checked = 0;
 function verify(source) {
   const graph = buildGraph(source);
@@ -32,6 +33,21 @@ function verify(source) {
   return graph;
 }
 for (const direction of ['LR', 'RL', 'TB', 'TD', 'BT']) {
+  const bidirectional = verify(bidirectionalFixture.replace('flowchart LR', 'flowchart ' + direction));
+  assert.equal(bidirectional.nodes.length, 7);
+  assert.equal(bidirectional.edges.length, 6);
+  assert.equal(bidirectional.nodes[0].label, 'Configuration master / decoder');
+  for (const [i, edge] of bidirectional.edges.entries()) {
+    assert.equal(edge.from, i);
+    assert.equal(edge.to, i + 1);
+    assert.equal(edge.startArrow, true);
+    assert.equal(edge.arrow, true);
+    const a = bidirectional.nodes[edge.from], b = bidirectional.nodes[edge.to];
+    if (direction === 'LR') assert(a.x < b.x);
+    else if (direction === 'RL') assert(a.x > b.x);
+    else if (direction === 'BT') assert(a.y > b.y);
+    else assert(a.y < b.y);
+  }
   verify(fixture.replace('flowchart TD', 'flowchart ' + direction));
   verify(`flowchart ${direction}\na[Start] --> b{Decision}\nb --> c("Round")\nc --> d[Finish]\na --> d\nb --> b\nx --> y\ny --> x\nx --> x`);
   // Long labels create different node heights; cycles and disconnected nodes
@@ -48,4 +64,31 @@ for (const direction of ['LR', 'RL', 'TB', 'TD', 'BT']) {
 const example = verify(fixture);
 assert.equal(example.nodes.length, 17);
 assert.equal(example.edges.length, 30);
+const mixed = verify('flowchart LR\na-b<-->|request / reply|b_c-->c---d-.->e; e<-->e %% loop');
+assert.equal(mixed.nodes[0].id, 'a-b');
+assert.equal(mixed.edges[0].label, 'request / reply');
+assert.deepEqual(Array.from(mixed.edges, e => [e.startArrow, e.arrow, e.dotted]), [
+  [true, true, false], [false, true, false], [false, false, false], [false, true, true], [true, true, false]
+]);
+assert.throws(() => buildGraph('---\nmaxEdges: 1\n---\nflowchart LR\na<-->b<-->c'), /Edge count exceeds maxEdges/);
+
+// Exercise the SVG renderer so parsing support also produces both arrowheads.
+const elements = [];
+function element(tag, attrs = {}) {
+  const result = { tag, attrs, children: [], append(...children) { this.children.push(...children); }, setAttribute(key, value) { this.attrs[key] = value; } };
+  elements.push(result);
+  return result;
+}
+const draw = vm.runInNewContext(script.slice(script.indexOf('    function draw('), script.indexOf('    function stop(')) + '\ndraw;', {
+  document: { createDocumentFragment: () => element('fragment') }, el: element,
+  scene: { replaceChildren() {} }, $: () => ({}), selectNode() {}, fit() {}, selectedId: null
+});
+draw(mixed);
+const paths = elements.filter(e => e.tag === 'path' && 'data-edge' in e.attrs);
+assert.equal(paths.length, mixed.edges.length);
+for (const [i, path] of paths.entries()) {
+  assert.equal(path.attrs['marker-start'], mixed.edges[i].startArrow ? 'url(#arrow)' : undefined);
+  assert.equal(path.attrs['marker-end'], mixed.edges[i].arrow ? 'url(#arrow)' : undefined);
+}
+assert.equal(elements.find(e => e.tag === 'marker').attrs.orient, 'auto-start-reverse');
 console.log(`Passed: ${checked} orthogonal segments avoid every block, across all directions, feedback cycles, self-loops, long edges, and varying node sizes.`);

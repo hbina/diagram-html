@@ -1,0 +1,7 @@
+flowchart LR
+      M["Configuration master / decoder"] <--> A["Stage A adapter"]
+      A <--> B["Stage B adapter"]
+      B <--> C["Stage C adapter"]
+      C <--> D["Stage D adapter"]
+      D <--> X["Remaining stage adapters"]
+      X <--> L["Stage L adapter"]
