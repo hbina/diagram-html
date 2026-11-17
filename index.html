@@ -24,7 +24,7 @@
           class="spacer"></span><button id="example">Example</button></div>
       <details id="syntaxHelp">
         <summary>Supported syntax &amp; limits</summary>
-        <p>A custom flowchart parser, supporting a subset of Mermaid syntax. No Mermaid library is used.</p>
+        <p>A custom parser, supporting a subset of Mermaid flowchart and state diagram syntax. No Mermaid library is used.</p>
         <p><code>flowchart LR</code> or <code>graph TB</code>; directions LR, RL, TB, TD, BT. Nodes:
           <code>a[Label]</code>, <code>a("Label")</code>, <code>a{Decision}</code>, or bare IDs. Edges:
           <code>a --&gt; b</code>, <code>a &lt;--&gt; b</code>, <code>a --&gt;|label| b</code>, <code>a --- b</code>,
@@ -39,7 +39,12 @@
           <code>end</code>; nested groups are accepted. Groups use consecutive rows or columns with up to four nodes per band.</p>
         <p>Define colors with <code>classDef name fill:#fff3cd,stroke:#ad7b00,color:#302400;</code>
           and apply them with <code>class a,b name;</code>. These three properties accept hex or named colors.
-          Other styling directives and diagram types are unsupported and report errors.</p>
+          Other styling directives are unsupported and report errors.</p>
+        <p>Basic <code>stateDiagram-v2</code> diagrams support <code>state "Label" as ID</code>,
+          <code>ID: Label</code>, <code>a --&gt; b: Transition label</code>, and <code>[*]</code> start/end markers.
+          Use one state statement per line. Transition labels may contain semicolons and numeric Mermaid entities such as
+          <code>#58;</code> for a colon. The default direction is TB; <code>direction LR</code> (or RL, TB, TD, BT) is accepted.
+          Composite states, notes, state styling, and other diagram types are unsupported and report errors.</p>
         <p>Defaults: 20,000 edges, 1,000,000 source characters. Layout uses layers, including cycle grouping.
           Connections use right-angle turns and route around blocks. Inputs merge on the leading side of each block;
           outputs share a separate line on the trailing side, including feedback connections. Dense

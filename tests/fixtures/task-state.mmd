@@ -1,0 +1,18 @@
+stateDiagram-v2
+    state "Interpret task" as s0
+    state "Ask title and wait" as s1
+    state "Save task" as s2
+    state "Recorded" as s3
+    state "Failed" as s4
+    state "Cancelled" as s5
+    [*] --> s0
+    s0 --> s2: Model#58; Complete
+    s0 --> s1: Model#58; MissingTitle
+    s0 --> s5: Model#58; Unrelated
+    s1 --> s0: Owner#58; Reply
+    s1 --> s5: Owner#58; Cancel
+    s2 --> s3: Effect#58; Saved
+    s2 --> s4: Effect#58; SaveFailed
+    s3 --> [*]
+    s4 --> [*]
+    s5 --> [*]

@@ -22,10 +22,10 @@ function buildGraph(source) {
   if (source.length > maxTextSize) throw new Error('Source exceeds maxTextSize (' + maxTextSize + ').');
   const nodes = [], edges = [], ids = new Map(), subgraphs = [], groupStack = [], groupIds = new Set();
   const classDefs = new Map(), assignments = [];
-  let direction = null;
+  let direction = null, stateDiagram = false;
   function node(id, label, shape) {
     const created = !ids.has(id);
-    if (created) { ids.set(id, nodes.length); nodes.push({ id, label: id, shape: 'rect' }); }
+    if (created) { ids.set(id, nodes.length); nodes.push({ id, label: id, shape: stateDiagram ? 'round' : 'rect' }); }
     const index = ids.get(id);
     if (label !== undefined) Object.assign(nodes[index], { label, shape });
     if (groupStack.length && nodes[index].group === undefined && (created || label !== undefined)) nodes[index].group = groupStack[groupStack.length - 1];
@@ -39,9 +39,39 @@ function buildGraph(source) {
     const skip = () => { while (/\s/.test(text[p] || '') && p < text.length) p++; };
     skip(); if (!text.slice(p) || text.startsWith('%%', p)) continue;
     if (!direction) {
-      const h = text.slice(p).match(/^(?:flowchart|graph)\s+(LR|RL|TB|TD|BT)\s*(?=;|%%|$)/);
-      if (!h) fail(li + 1, 'Expected flowchart LR (or RL, TB, TD, BT).');
-      direction = h[1] === 'TD' ? 'TB' : h[1]; p += h[0].length;
+      const h = text.slice(p).match(/^(?:(?:flowchart|graph)\s+(LR|RL|TB|TD|BT)|(stateDiagram-v2))\s*(?=;|%%|$)/);
+      if (!h) fail(li + 1, 'Expected flowchart LR (or RL, TB, TD, BT) or stateDiagram-v2.');
+      stateDiagram = Boolean(h[2]);
+      direction = stateDiagram || h[1] === 'TD' ? 'TB' : h[1]; p += h[0].length;
+    }
+    if (stateDiagram) {
+      // State transition labels run to the end of the line. In particular,
+      // semicolons in Mermaid entity codes must not split statements.
+      const body = text.slice(p).split('%%')[0].trim();
+      if (!body || body === ';') continue;
+      const decode = label => label.replace(/#(x[0-9a-f]+|\d+);/gi, (entity, code) => {
+        const value = /^x/i.test(code) ? parseInt(code.slice(1), 16) : Number(code);
+        return value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff) ? String.fromCodePoint(value) : entity;
+      });
+      const endpoint = (id, start) => id === '[*]'
+        ? node(start ? ':start' : ':end', start ? 'Start' : 'End', start ? 'start' : 'end')
+        : node(id);
+      let match;
+      if ((match = body.match(/^direction\s+(LR|RL|TB|TD|BT)\s*;?$/))) {
+        direction = match[1] === 'TD' ? 'TB' : match[1];
+      } else if ((match = body.match(/^state\s+("(?:\\.|[^"\\])*")\s+as\s+([A-Za-z0-9_-]+)\s*;?$/))) {
+        node(match[2], decode(unquote(match[1])), 'round');
+      } else if ((match = body.match(/^(\[\*\]|[A-Za-z0-9_-]+)\s*-->\s*(\[\*\]|[A-Za-z0-9_-]+)(?:\s*:\s*(.*)|\s*;?)$/))) {
+        edges.push({ from: endpoint(match[1], true), to: endpoint(match[2], false), label: decode((match[3] || '').trim()), arrow: true, startArrow: false, dotted: false });
+        if (edges.length > maxEdges) fail(li + 1, 'Edge count exceeds maxEdges (' + maxEdges + ').');
+      } else if ((match = body.match(/^([A-Za-z0-9_-]+)\s*:\s*(.+)$/))) {
+        node(match[1], decode(match[2]), 'round');
+      } else if ((match = body.match(/^([A-Za-z0-9_-]+)\s*;?$/))) {
+        node(match[1]);
+      } else {
+        fail(li + 1, 'Unsupported state diagram syntax near ' + body.slice(0, 60));
+      }
+      continue;
     }
     function readLabel(close) {
       skip(); let result = '';
@@ -149,7 +179,7 @@ function buildGraph(source) {
       target.style = { ...target.style, ...style };
     }
   }
-  if (!direction || !nodes.length) throw new Error('Enter a flowchart header and at least one node.');
+  if (!direction || !nodes.length) throw new Error('Enter a flowchart or stateDiagram-v2 header and at least one node.');
   // Iterative Kosaraju groups cycles without exhausting the call stack.
   const n = nodes.length, out = Array.from({ length: n }, () => []), incoming = Array.from({ length: n }, () => []);
   for (const e of edges) { out[e.from].push(e.to); incoming[e.to].push(e.from); }
@@ -208,6 +238,7 @@ function buildGraph(source) {
   }
   const horizontal = direction === 'LR' || direction === 'RL';
   for (const v of nodes) { v.lines = wrap(v.label); v.w = 240; v.h = Math.max(64, v.lines.length * 17 + 28); if (v.shape === 'diamond') { v.w = 300; v.h *= 1.65; } }
+  for (const v of nodes) if (v.shape === 'start' || v.shape === 'end') { v.w = v.h = 24; v.lines = []; }
   const layerSizes = layers.map(layer => ({ depth: layer.reduce((m, i) => Math.max(m, horizontal ? nodes[i].w : nodes[i].h), 0), breadth: layer.reduce((sum, i) => sum + (horizontal ? nodes[i].h : nodes[i].w) + 32, 0) - 32 }));
   const outgoingLanes = new Int32Array(layers.length), incomingLanes = new Int32Array(layers.length);
   let longEdges = 0;
@@ -358,7 +389,7 @@ flowchart LR
       const i = Number(g.getAttribute('data-node')), selected = i === index;
       g.setAttribute('opacity', index === -1 || related.has(i) ? 1 : .2);
       g.setAttribute('aria-pressed', String(selected));
-      const shape = g.querySelector('rect, polygon');
+      const shape = g.querySelector('rect, polygon, circle');
       shape.setAttribute('fill', selected ? '#365f62' : current.nodes[i].style?.fill || '#202f44');
       shape.setAttribute('stroke', selected ? '#9ff5cf' : index !== -1 && related.has(i) ? '#8cb9ff' : current.nodes[i].style?.stroke || '#87a9d7');
       shape.setAttribute('stroke-width', selected ? 3 : 1.3);
@@ -408,7 +439,11 @@ flowchart LR
     for (const [i, v] of graph.nodes.entries()) {
       const g = el('g', { 'data-node': i, tabindex: 0, role: 'button', 'aria-label': v.id + ': ' + v.label + '. Highlight connections', 'aria-pressed': 'false', style: 'cursor: pointer' }); g.append(el('title', {}, v.id + ': ' + v.label));
       const attrs = { fill: v.style?.fill || '#202f44', stroke: v.style?.stroke || '#87a9d7', 'stroke-width': 1.3 };
-      if (v.shape === 'diamond') g.append(el('polygon', { ...attrs, points: `${v.x + v.w / 2},${v.y} ${v.x + v.w},${v.y + v.h / 2} ${v.x + v.w / 2},${v.y + v.h} ${v.x},${v.y + v.h / 2}` }));
+      if (v.shape === 'start' || v.shape === 'end') {
+        g.append(el('circle', { ...attrs, cx: v.x + v.w / 2, cy: v.y + v.h / 2, r: v.w / 2 }));
+        g.append(el('circle', { cx: v.x + v.w / 2, cy: v.y + v.h / 2, r: v.shape === 'start' ? v.w / 2 - 2 : 7, fill: '#87a9d7', 'pointer-events': 'none' }));
+      }
+      else if (v.shape === 'diamond') g.append(el('polygon', { ...attrs, points: `${v.x + v.w / 2},${v.y} ${v.x + v.w},${v.y + v.h / 2} ${v.x + v.w / 2},${v.y + v.h} ${v.x},${v.y + v.h / 2}` }));
       else g.append(el('rect', { ...attrs, x: v.x, y: v.y, width: v.w, height: v.h, rx: v.shape === 'round' ? 24 : 7 }));
       const text = el('text', { x: v.x + v.w / 2, y: v.y + v.h / 2 - (v.lines.length - 1) * 8.5 + 4, fill: v.style?.color || '#e2ecfa', 'font-size': 13, 'text-anchor': 'middle' });
       v.lines.forEach((line, i) => text.append(el('tspan', { x: v.x + v.w / 2, dy: i ? 17 : 0 }, line))); g.append(text); nodeGroup.append(g);

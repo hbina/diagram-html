@@ -7,6 +7,7 @@ const script = fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8');
 const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/owner-flowchart.mmd'), 'utf8');
 const bidirectionalFixture = fs.readFileSync(path.join(__dirname, 'fixtures/bidirectional-flowchart.mmd'), 'utf8');
 const ethernetFixture = fs.readFileSync(path.join(__dirname, 'fixtures/ethernet-flowchart.mmd'), 'utf8');
+const stateFixture = fs.readFileSync(path.join(__dirname, 'fixtures/task-state.mmd'), 'utf8');
 let checked = 0;
 function verify(source) {
   const graph = buildGraph(source);
@@ -49,6 +50,16 @@ function verify(source) {
   return graph;
 }
 for (const direction of ['LR', 'RL', 'TB', 'TD', 'BT']) {
+  const states = verify(stateFixture.replace('stateDiagram-v2', 'stateDiagram-v2\ndirection ' + direction));
+  assert.equal(states.nodes.length, 8);
+  assert.equal(states.edges.length, 11);
+  assert.equal(states.nodes[0].label, 'Interpret task');
+  assert.equal(states.edges[1].label, 'Model: Complete');
+  assert.equal(states.edges[4].label, 'Owner: Reply');
+  assert.equal(states.nodes[states.edges[0].from].shape, 'start');
+  const end = states.nodes.findIndex(v => v.shape === 'end');
+  assert.equal(states.edges.filter(e => e.to === end).length, 3);
+  assert.notEqual(states.edges[0].from, end, 'Start and end must be distinct nodes');
   const insideK = verify(`flowchart ${direction}
 subgraph K["Inside K"]
 A["TCP configuration register"]
@@ -140,6 +151,30 @@ for (const [i, path] of paths.entries()) {
   assert.equal(path.attrs['marker-end'], mixed.edges[i].arrow ? 'url(#arrow)' : undefined);
 }
 assert.equal(elements.find(e => e.tag === 'marker').attrs.orient, 'auto-start-reverse');
+const states = verify(stateFixture);
+assert.equal(states.direction, 'TB');
+elements.length = 0;
+draw(states);
+const stateNodes = elements.filter(e => e.attrs['data-node'] !== undefined);
+assert.equal(stateNodes.filter(e => e.children.some(c => c.tag === 'circle')).length, 2);
+assert.equal(elements.filter(e => e.tag === 'path' && 'data-edge' in e.attrs).length, 11);
+assert(elements.some(e => e.tag === 'text' && e.attrs['data-edge'] === 1));
+for (const node of stateNodes) {
+  node.getAttribute = key => node.attrs[key];
+  node.querySelector = () => node.children.find(child => ['rect', 'polygon', 'circle'].includes(child.tag));
+}
+const selectState = vm.runInNewContext(script.slice(script.indexOf('  function selectNode('), script.indexOf('  function draw(')) + '\nselectNode;', {
+  current: states, selectedId: null, Set,
+  scene: { querySelectorAll: selector => selector === '[data-node]' ? stateNodes : [] }
+});
+selectState(states.nodes.find(v => v.shape === 'start').id);
+selectState(null);
+const descriptions = verify('stateDiagram-v2\na-->b: first; second#58; &#60;safe#62;\nb: Updated description\nstate "Quoted \\"label\\"" as a');
+assert.equal(descriptions.nodes[0].label, 'Quoted "label"');
+assert.equal(descriptions.nodes[1].label, 'Updated description');
+assert.equal(descriptions.edges[0].label, 'first; second: &<safe>');
+assert.throws(() => buildGraph('---\nmaxEdges: 1\n---\nstateDiagram-v2\na --> b\nb --> c'), /Edge count exceeds maxEdges/);
+assert.throws(() => buildGraph('stateDiagram-v2\nstate Composite {\na --> b\n}'), /Line 2: Unsupported state diagram syntax/);
 const ethernet = verify(ethernetFixture);
 elements.length = 0;
 draw(ethernet);
