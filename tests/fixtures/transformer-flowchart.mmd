@@ -1,0 +1,35 @@
+flowchart TD
+    %% Input & Mode Control
+    Input["User Query + Chat Template<br/>(/think or /no_think flag)"] --> Tok["BBPE Tokenizer<br/>(Vocab Size: 151,669)"]
+    Tok --> Emb["Token Embeddings<br/>(Tied for 0.6B–4B; Untied for 8B+)"]
+
+    %% Transformer Layer Block
+    subgraph Block ["Transformer Layer × N (28 to 94 Layers)"]
+        direction TB
+        Norm1["Pre-RMSNorm"] --> Attn["Grouped Query Attention (GQA)<br/>• No QKV-Bias + QK-Norm<br/>• RoPE (Base 1M) + YaRN & DCA"]
+        Attn --> Res1(("➕"))
+        Norm1 -.-> Res1
+
+        Res1 --> Norm2["Pre-RMSNorm"]
+        Norm2 --> ArchSwitch{"Architecture Type"}
+
+        %% Dense Path
+        ArchSwitch -- "Dense (0.6B–32B)" --> DenseFFN["SwiGLU Feed-Forward Network"]
+
+        %% MoE Path
+        ArchSwitch -- "MoE (30B-A3B / 235B-A22B)" --> Router["Top-8 Router<br/>(Global-Batch Load Balancing)"]
+        Router --> Experts["128 Fine-Grained Experts (8 Active)<br/>(No Shared Experts)"]
+
+        DenseFFN --> Res2(("➕"))
+        Experts --> Res2
+        Res1 -.-> Res2
+    end
+
+    Emb --> Norm1
+
+    %% Output & Inference Budget Loop
+    Res2 --> FinalNorm["Final RMSNorm + LM Head"]
+    FinalNorm --> BudgetCheck{"Thinking Budget<br/>Reached?"}
+    BudgetCheck -- "Yes (Inject Stop Prompt)" --> ForceEnd["Insert: '...give solution now.\n</think>'"]
+    BudgetCheck -- "No" --> Gen["Autoregressive Generation<br/>(<think>...</think> + Final Response)"]
+    ForceEnd --> Gen

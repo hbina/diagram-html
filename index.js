@@ -97,13 +97,23 @@ function buildGraph(source) {
       if (!m) fail(li + 1, 'Expected node ID near ' + text.slice(p, p + 40));
       const id = m[0]; p += id.length; skip();
       const opening = text[p], close = { '[': ']', '(': ')', '{': '}' }[opening];
-      if (close) { p++; return node(id, readLabel(close), opening === '(' ? 'round' : opening === '{' ? 'diamond' : 'rect'); }
+      if (close) {
+        p++;
+        const circle = opening === '(' && text[p] === '(';
+        if (circle) p++;
+        const label = readLabel(close);
+        if (circle) {
+          if (text[p] !== ')') fail(li + 1, 'Expected )) after circle label.');
+          p++;
+        }
+        return node(id, label, circle ? 'circle' : opening === '(' ? 'round' : opening === '{' ? 'diamond' : 'rect');
+      }
       return node(id);
     }
     while (p < text.length) {
       skip(); if (text.startsWith('%%', p)) break;
       if (text[p] === ';') { p++; continue; }
-      const directive = text.slice(p).match(/^(subgraph|end|classDef|class)\b/);
+      const directive = text.slice(p).match(/^(subgraph|end|classDef|class|direction)\b/);
       if (directive) {
         const kind = directive[1]; p += kind.length; skip();
         if (kind === 'subgraph') {
@@ -113,6 +123,14 @@ function buildGraph(source) {
           groupIds.add(match[1]);
           subgraphs.push({ id: match[1], label: unquote((match[2] ?? match[1]).trim()), parent: groupStack.at(-1), line: li + 1 });
           groupStack.push(subgraphs.length - 1); p += match[0].length;
+        } else if (kind === 'direction') {
+          const match = text.slice(p).match(/^(LR|RL|TB|TD|BT)\s*(?=;|%%|$)/);
+          if (!match) fail(li + 1, 'Expected direction LR (or RL, TB, TD, BT).');
+          if (!groupStack.length) fail(li + 1, 'Flowchart direction directives must be inside a subgraph.');
+          // The band layout uses the root direction for every group. Accept
+          // local declarations without changing the enclosing graph's direction.
+          subgraphs[groupStack.at(-1)].direction = match[1] === 'TD' ? 'TB' : match[1];
+          p += match[0].length;
         } else if (kind === 'end') {
           if (!groupStack.length) fail(li + 1, 'Unexpected subgraph end.');
           groupStack.pop();
@@ -142,7 +160,7 @@ function buildGraph(source) {
         continue;
       }
       let from = readNode(); skip();
-      while (text.startsWith('<-->', p) || text.startsWith('-->', p) || text.startsWith('---', p) || text.startsWith('-.', p)) {
+      while (text.startsWith('<-->', p) || text.startsWith('--', p) || text.startsWith('-.', p)) {
         let arrow = true, startArrow = false, dotted = false, label = '';
         if (text.startsWith('<-->', p)) { startArrow = true; p += 4; }
         else if (text.startsWith('-.', p)) {
@@ -155,7 +173,13 @@ function buildGraph(source) {
             if (!match) fail(li + 1, 'Expected dotted edge: -.-> or -. label .->');
             label = match[1].trim(); arrow = match[2] === '->'; p += match[0].length;
           }
-        } else { arrow = text.startsWith('-->', p); p += 3; }
+        } else if (text.startsWith('-->', p) || text.startsWith('---', p)) {
+          arrow = text.startsWith('-->', p); p += 3;
+        } else {
+          const match = text.slice(p).match(/^--\s+("(?:\\.|[^"\\])*"|.+?)\s+-->/);
+          if (!match) fail(li + 1, 'Expected labeled edge: -- "label" -->');
+          label = match[1]; p += match[0].length;
+        }
         skip();
         if (text[p] === '|') {
           if (label) fail(li + 1, 'Use either an inline label or a |label| on an edge.');
@@ -239,6 +263,7 @@ function buildGraph(source) {
   const horizontal = direction === 'LR' || direction === 'RL';
   for (const v of nodes) { v.lines = wrap(v.label); v.w = 240; v.h = Math.max(64, v.lines.length * 17 + 28); if (v.shape === 'diamond') { v.w = 300; v.h *= 1.65; } }
   for (const v of nodes) if (v.shape === 'start' || v.shape === 'end') { v.w = v.h = 24; v.lines = []; }
+  for (const v of nodes) if (v.shape === 'circle') v.w = v.h = Math.max(64, v.lines.length * 17 + 28, ...v.lines.map(line => Array.from(line).length * 9 + 28));
   const layerSizes = layers.map(layer => ({ depth: layer.reduce((m, i) => Math.max(m, horizontal ? nodes[i].w : nodes[i].h), 0), breadth: layer.reduce((sum, i) => sum + (horizontal ? nodes[i].h : nodes[i].w) + 32, 0) - 32 }));
   const outgoingLanes = new Int32Array(layers.length), incomingLanes = new Int32Array(layers.length);
   let longEdges = 0;
@@ -443,6 +468,7 @@ flowchart LR
         g.append(el('circle', { ...attrs, cx: v.x + v.w / 2, cy: v.y + v.h / 2, r: v.w / 2 }));
         g.append(el('circle', { cx: v.x + v.w / 2, cy: v.y + v.h / 2, r: v.shape === 'start' ? v.w / 2 - 2 : 7, fill: '#87a9d7', 'pointer-events': 'none' }));
       }
+      else if (v.shape === 'circle') g.append(el('circle', { ...attrs, cx: v.x + v.w / 2, cy: v.y + v.h / 2, r: v.w / 2 }));
       else if (v.shape === 'diamond') g.append(el('polygon', { ...attrs, points: `${v.x + v.w / 2},${v.y} ${v.x + v.w},${v.y + v.h / 2} ${v.x + v.w / 2},${v.y + v.h} ${v.x},${v.y + v.h / 2}` }));
       else g.append(el('rect', { ...attrs, x: v.x, y: v.y, width: v.w, height: v.h, rx: v.shape === 'round' ? 24 : 7 }));
       const text = el('text', { x: v.x + v.w / 2, y: v.y + v.h / 2 - (v.lines.length - 1) * 8.5 + 4, fill: v.style?.color || '#e2ecfa', 'font-size': 13, 'text-anchor': 'middle' });

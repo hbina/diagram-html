@@ -8,6 +8,7 @@ const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/owner-flowchart.m
 const bidirectionalFixture = fs.readFileSync(path.join(__dirname, 'fixtures/bidirectional-flowchart.mmd'), 'utf8');
 const ethernetFixture = fs.readFileSync(path.join(__dirname, 'fixtures/ethernet-flowchart.mmd'), 'utf8');
 const stateFixture = fs.readFileSync(path.join(__dirname, 'fixtures/task-state.mmd'), 'utf8');
+const transformerFixture = fs.readFileSync(path.join(__dirname, 'fixtures/transformer-flowchart.mmd'), 'utf8');
 let checked = 0;
 function verify(source) {
   const graph = buildGraph(source);
@@ -50,6 +51,17 @@ function verify(source) {
   return graph;
 }
 for (const direction of ['LR', 'RL', 'TB', 'TD', 'BT']) {
+  const transformer = verify(transformerFixture.replace('flowchart TD', 'flowchart ' + direction));
+  assert.equal(transformer.direction, direction === 'TD' ? 'TB' : direction);
+  assert.equal(transformer.subgraphs[0].direction, 'TB');
+  assert.equal(transformer.nodes.length, 16);
+  assert.equal(transformer.edges.length, 19);
+  assert.equal(transformer.subgraphs.length, 1);
+  assert.equal(transformer.nodes.filter(v => v.shape === 'circle').length, 2);
+  assert.equal(transformer.nodes.filter(v => v.group === 0).length, 9);
+  assert.equal(transformer.edges[7].label, 'Dense (0.6B–32B)');
+  assert.equal(transformer.edges[8].label, 'MoE (30B-A3B / 235B-A22B)');
+  assert.equal(transformer.edges.filter(e => e.dotted).length, 2);
   const states = verify(stateFixture.replace('stateDiagram-v2', 'stateDiagram-v2\ndirection ' + direction));
   assert.equal(states.nodes.length, 8);
   assert.equal(states.edges.length, 11);
@@ -143,6 +155,21 @@ const draw = vm.runInNewContext(script.slice(script.indexOf('  function draw('),
   document: { createDocumentFragment: () => element('fragment') }, el: element,
   scene: { replaceChildren() {} }, $: () => ({}), selectNode() {}, fit() {}, selectedId: null
 });
+const transformer = verify(transformerFixture);
+draw(transformer);
+assert.equal(elements.filter(e => e.tag === 'circle').length, 2);
+assert.equal(elements.filter(e => e.tag === 'path' && 'data-edge' in e.attrs).length, 19);
+const stopPrompt = transformer.nodes.find(v => v.id === 'ForceEnd');
+assert.deepEqual(stopPrompt.lines, ["Insert: '...give solution", 'now.', "</think>'"]);
+assert(transformer.nodes.find(v => v.id === 'Gen').lines.join(' ').includes('<think>...</think>'));
+assert.throws(() => buildGraph('flowchart TB\na(("label")'), /Expected \)\) after circle label/);
+assert.throws(() => buildGraph('flowchart TB\na -- "label" b'), /Expected labeled edge/);
+const localDirection = verify('flowchart TB\nsubgraph g\ndirection LR\na --> b\nend\nb --> c');
+assert.equal(localDirection.direction, 'TB');
+assert.equal(localDirection.subgraphs[0].direction, 'LR');
+assert.throws(() => buildGraph('flowchart TB\nsubgraph g\ndirection invalid\na\nend'), /Expected direction/);
+verify('flowchart TB\na -- plain label --> b -- "quoted --> label" --> c');
+elements.length = 0;
 draw(mixed);
 const paths = elements.filter(e => e.tag === 'path' && 'data-edge' in e.attrs);
 assert.equal(paths.length, mixed.edges.length);

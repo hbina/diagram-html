@@ -26,17 +26,19 @@
         <summary>Supported syntax &amp; limits</summary>
         <p>A custom parser, supporting a subset of Mermaid flowchart and state diagram syntax. No Mermaid library is used.</p>
         <p><code>flowchart LR</code> or <code>graph TB</code>; directions LR, RL, TB, TD, BT. Nodes:
-          <code>a[Label]</code>, <code>a("Label")</code>, <code>a{Decision}</code>, or bare IDs. Edges:
-          <code>a --&gt; b</code>, <code>a &lt;--&gt; b</code>, <code>a --&gt;|label| b</code>, <code>a --- b</code>,
+          <code>a[Label]</code>, <code>a("Label")</code>, <code>a(("Circle"))</code>, <code>a{Decision}</code>, or bare IDs. Edges:
+          <code>a --&gt; b</code>, <code>a &lt;--&gt; b</code>, <code>a --&gt;|label| b</code>, <code>a -- "label" --&gt; b</code>, <code>a --- b</code>,
           <code>a -. select .-&gt; b</code>, <code>a -.-&gt;|label| b</code>, <code>a -.- b</code>; chains are accepted.
           Separate
           statements with newlines or semicolons. IDs use letters, numbers, underscores or hyphens.
         </p>
         <p><code>%%</code> comments and a leading YAML header with <code>maxEdges</code> / <code>maxTextSize</code> are
           accepted. Other header entries are ignored. Labels are plain text; quoted labels can contain punctuation. Node
-          labels support <code>&lt;br/&gt;</code> line breaks.
+          labels support <code>&lt;br/&gt;</code> and <code>\n</code> line breaks.
           Quoted edge labels are supported. Group nodes with <code>subgraph ID["Label"]</code> and
-          <code>end</code>; nested groups are accepted. Groups use consecutive rows or columns with up to four nodes per band.</p>
+          <code>end</code>; nested groups are accepted. Subgraph <code>direction</code> statements are accepted;
+          the current layout uses the root flowchart direction for all groups.
+          Groups use consecutive rows or columns with up to four nodes per band.</p>
         <p>Define colors with <code>classDef name fill:#fff3cd,stroke:#ad7b00,color:#302400;</code>
           and apply them with <code>class a,b name;</code>. These three properties accept hex or named colors.
           Other styling directives are unsupported and report errors.</p>
