@@ -217,6 +217,10 @@ code {
   background: #171e29
 }
 
+.edge-input { color: #8cb9ff }
+.edge-output { color: #ffc078 }
+.edge-both { color: #d6a4ff }
+
 .spacer {
   flex: 1
 }

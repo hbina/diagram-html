@@ -366,17 +366,30 @@ flowchart LR
     scene.querySelectorAll('[data-edge]').forEach(element => {
       const e = current.edges[Number(element.getAttribute('data-edge'))];
       const related = e.from === index || e.to === index;
+      const input = e.to === index || (e.startArrow && e.from === index);
+      const output = e.from === index || (e.startArrow && e.to === index);
+      const kind = input && output ? 'both' : input ? 'input' : 'output';
+      const color = kind === 'both' ? '#d6a4ff' : kind === 'input' ? '#8cb9ff' : '#ffc078';
+      const highlighted = index !== -1 && related;
       element.setAttribute('opacity', index === -1 || related ? 1 : .15);
       if (element.tagName === 'path') {
-        element.setAttribute('stroke', index !== -1 && related ? '#9ff5cf' : '#637c9c');
-        element.setAttribute('stroke-width', index !== -1 && related ? 2.5 : 1.4);
-      }
+        element.setAttribute('stroke', highlighted ? color : '#637c9c');
+        element.setAttribute('stroke-width', highlighted ? 2.5 : 1.4);
+        const marker = highlighted ? 'url(#arrow-' + kind + ')' : 'url(#arrow)';
+        if (e.startArrow) element.setAttribute('marker-start', marker);
+        if (e.arrow) element.setAttribute('marker-end', marker);
+      } else element.setAttribute('fill', highlighted ? color : '#c3d5ec');
     });
   }
   function draw(graph) {
     drag = null;
     const fragment = document.createDocumentFragment(), defs = el('defs'), marker = el('marker', { id: 'arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
     marker.append(el('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#849bb9' })); defs.append(marker); fragment.append(defs);
+    for (const [kind, color] of [['input', '#8cb9ff'], ['output', '#ffc078'], ['both', '#d6a4ff']]) {
+      const coloredMarker = el('marker', { id: 'arrow-' + kind, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
+      coloredMarker.append(el('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: color }));
+      defs.append(coloredMarker);
+    }
     const groups = el('g');
     for (const group of graph.subgraphs || []) {
       if (group.w === undefined) continue;

@@ -172,4 +172,36 @@ assert.throws(() => buildGraph('flowchart TD\na\nclass a missing'), /Unknown cla
 assert.throws(() => buildGraph('flowchart TD\na\nclassDef bad fill:url(javascript:bad)'), /Supported class properties/);
 const external = verify('flowchart TD\nexternal[Outside]\nsubgraph group\na --> external\nend');
 assert.equal(external.nodes[0].group, undefined, 'Referencing an external node must not move it into a group');
+// Incoming, outgoing and two-way connections color their lines, labels and
+// arrowheads together, and clearing selection restores the default appearance.
+const highlightGraph = verify('flowchart LR\na -->|incoming| b\nb -->|outgoing| c\nb -->|loop| b\nb <-->|two-way| d\nx -->|unrelated| y');
+elements.length = 0;
+draw(highlightGraph);
+const renderedEdges = elements.filter(e => e.attrs['data-edge'] !== undefined);
+for (const edge of renderedEdges) {
+  edge.getAttribute = key => edge.attrs[key];
+  edge.tagName = edge.tag;
+}
+const selectEdges = vm.runInNewContext(script.slice(script.indexOf('  function selectNode('), script.indexOf('  function draw(')) + '\nselectNode;', {
+  current: highlightGraph, selectedId: null, Set,
+  scene: { querySelectorAll: selector => selector === '[data-edge]' ? renderedEdges : [] }
+});
+selectEdges('b');
+const expectedKinds = ['input', 'output', 'both', 'both', null];
+const expectedColors = ['#8cb9ff', '#ffc078', '#d6a4ff', '#d6a4ff', '#637c9c'];
+for (const edge of renderedEdges) {
+  const i = edge.attrs['data-edge'];
+  assert.equal(edge.attrs.opacity, i === 4 ? .15 : 1);
+  assert.equal(edge.attrs[edge.tag === 'path' ? 'stroke' : 'fill'], edge.tag === 'text' && i === 4 ? '#c3d5ec' : expectedColors[i]);
+  if (edge.tag === 'path') {
+    assert.equal(edge.attrs['marker-end'], expectedKinds[i] ? `url(#arrow-${expectedKinds[i]})` : 'url(#arrow)');
+    if (i === 3) assert.equal(edge.attrs['marker-start'], 'url(#arrow-both)');
+  }
+}
+selectEdges(null);
+for (const edge of renderedEdges) {
+  assert.equal(edge.attrs.opacity, 1);
+  assert.equal(edge.attrs[edge.tag === 'path' ? 'stroke' : 'fill'], edge.tag === 'path' ? '#637c9c' : '#c3d5ec');
+  if (edge.tag === 'path') assert.equal(edge.attrs['marker-end'], 'url(#arrow)');
+}
 console.log(`Passed: ${checked} orthogonal segments avoid every block, across all directions, feedback cycles, self-loops, long edges, and varying node sizes.`);
