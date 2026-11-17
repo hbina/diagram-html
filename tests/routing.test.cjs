@@ -8,6 +8,7 @@ const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/owner-flowchart.m
 const bidirectionalFixture = fs.readFileSync(path.join(__dirname, 'fixtures/bidirectional-flowchart.mmd'), 'utf8');
 const ethernetFixture = fs.readFileSync(path.join(__dirname, 'fixtures/ethernet-flowchart.mmd'), 'utf8');
 const stateFixture = fs.readFileSync(path.join(__dirname, 'fixtures/task-state.mmd'), 'utf8');
+const ethCoreFixture = fs.readFileSync(path.join(__dirname, 'fixtures/eth-core-flowchart.mmd'), 'utf8');
 const transformerFixture = fs.readFileSync(path.join(__dirname, 'fixtures/transformer-flowchart.mmd'), 'utf8');
 let checked = 0;
 function verify(source) {
@@ -121,6 +122,10 @@ end`);
     else assert(a.y < b.y);
   }
   verify(fixture.replace('flowchart TD', 'flowchart ' + direction));
+  const ethCore = verify(ethCoreFixture.replace('flowchart LR', 'flowchart ' + direction));
+  assert.equal(ethCore.nodes.length, 5);
+  assert.equal(ethCore.edges.length, 6);
+  assert.equal(ethCore.nodes.filter(v => v.group === 0).length, 3);
   verify(`flowchart ${direction}\na[Start] --> b{Decision}\nb --> c("Round")\nc --> d[Finish]\na --> d\nb --> b\nx --> y\ny --> x\nx --> x`);
   // Long labels create different node heights; cycles and disconnected nodes
   // exercise channels alongside both wide and tall blocks.
@@ -196,6 +201,28 @@ const selectState = vm.runInNewContext(script.slice(script.indexOf('  function s
 });
 selectState(states.nodes.find(v => v.shape === 'start').id);
 selectState(null);
+// Cylinders, entities and line breaks in node, edge and subgraph labels.
+const ethCore = verify(ethCoreFixture);
+const bram = ethCore.nodes.find(v => v.id === 'bram');
+assert.equal(bram.shape, 'cylinder');
+assert.deepEqual(bram.lines, ['BRAM', 'dout = mem[addr]', '1-cycle latency']);
+assert.deepEqual(ethCore.nodes[0].lines, ['State registers', 'state <= next_state']);
+assert.equal(ethCore.edges[2].label, 'ram_addr, ram_en,\nram_we, ram_din');
+assert.equal(ethCore.subgraphs[0].label, 'eth_core.v (clocked, eth_rx_clk)');
+elements.length = 0;
+draw(ethCore);
+const bramNode = elements.find(e => e.attrs['data-node'] === ethCore.nodes.indexOf(bram));
+assert.deepEqual(bramNode.children.map(c => c.tag), ['title', 'path', 'text'], 'Cylinder draws one outline path');
+const bramLabel = elements.find(e => e.tag === 'text' && e.attrs['data-edge'] === 2);
+assert.deepEqual(bramLabel.children.map(c => c.tag), ['tspan', 'tspan']);
+const breaks = verify('flowchart LR\na["one</br>two<BR>three<br />four\\nfive"] -->|"x</br>y"| b[(plain)]\nsubgraph g["A<br/>B &amp; C"]\nb\nend');
+assert.deepEqual(breaks.nodes[0].lines, ['one', 'two', 'three', 'four', 'five']);
+assert.equal(breaks.edges[0].label, 'x\ny');
+assert.equal(breaks.nodes[1].shape, 'cylinder');
+assert.equal(breaks.subgraphs[0].label, 'A B & C');
+const entities = verify('flowchart LR\na["&lt;br/&gt; #lt;tag#gt; &amp;lt; #60; &#62; &unknown; #constructor; #quot;q#quot;"]');
+assert.equal(entities.nodes[0].label, '<br/> <tag> &lt; < &> &unknown; #constructor; "q"');
+assert.throws(() => buildGraph('flowchart LR\na[("open")'), /Expected \)\] after cylinder label/);
 const descriptions = verify('stateDiagram-v2\na-->b: first; second#58; &#60;safe#62;\nb: Updated description\nstate "Quoted \\"label\\"" as a');
 assert.equal(descriptions.nodes[0].label, 'Quoted "label"');
 assert.equal(descriptions.nodes[1].label, 'Updated description');

@@ -34,6 +34,19 @@ function buildGraph(source) {
   function unquote(label) {
     return label.startsWith('"') && label.endsWith('"') ? label.slice(1, -1).replace(/\\(["\\])/g, '$1') : label;
   }
+  // Labels store line breaks as newlines. Breaks are split before entities are
+  // decoded, so an escaped &lt;br&gt; stays visible text. Mermaid entity codes
+  // (#lt; #60;) and common HTML entities (&lt; &amp;) are decoded.
+  const named = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", nbsp: '\u00a0' };
+  function decodeLabel(label) {
+    return label.split(/<\/?br\s*\/?\s*>|\\n/i).map(line => line.replace(/&([a-z]+);|#([a-z0-9]+);/gi, (entity, html, code) => {
+      const name = (html || code).toLowerCase();
+      if (Object.hasOwn(named, name)) return named[name];
+      if (html || !/^(x[0-9a-f]+|\d+)$/.test(name)) return entity;
+      const value = name[0] === 'x' ? parseInt(name.slice(1), 16) : Number(name);
+      return value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff) ? String.fromCodePoint(value) : entity;
+    })).join('\n');
+  }
   for (let li = first; li < lines.length; li++) {
     const text = lines[li]; let p = 0;
     const skip = () => { while (/\s/.test(text[p] || '') && p < text.length) p++; };
@@ -49,10 +62,6 @@ function buildGraph(source) {
       // semicolons in Mermaid entity codes must not split statements.
       const body = text.slice(p).split('%%')[0].trim();
       if (!body || body === ';') continue;
-      const decode = label => label.replace(/#(x[0-9a-f]+|\d+);/gi, (entity, code) => {
-        const value = /^x/i.test(code) ? parseInt(code.slice(1), 16) : Number(code);
-        return value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff) ? String.fromCodePoint(value) : entity;
-      });
       const endpoint = (id, start) => id === '[*]'
         ? node(start ? ':start' : ':end', start ? 'Start' : 'End', start ? 'start' : 'end')
         : node(id);
@@ -60,12 +69,12 @@ function buildGraph(source) {
       if ((match = body.match(/^direction\s+(LR|RL|TB|TD|BT)\s*;?$/))) {
         direction = match[1] === 'TD' ? 'TB' : match[1];
       } else if ((match = body.match(/^state\s+("(?:\\.|[^"\\])*")\s+as\s+([A-Za-z0-9_-]+)\s*;?$/))) {
-        node(match[2], decode(unquote(match[1])), 'round');
+        node(match[2], decodeLabel(unquote(match[1])), 'round');
       } else if ((match = body.match(/^(\[\*\]|[A-Za-z0-9_-]+)\s*-->\s*(\[\*\]|[A-Za-z0-9_-]+)(?:\s*:\s*(.*)|\s*;?)$/))) {
-        edges.push({ from: endpoint(match[1], true), to: endpoint(match[2], false), label: decode((match[3] || '').trim()), arrow: true, startArrow: false, dotted: false });
+        edges.push({ from: endpoint(match[1], true), to: endpoint(match[2], false), label: decodeLabel((match[3] || '').trim()), arrow: true, startArrow: false, dotted: false });
         if (edges.length > maxEdges) fail(li + 1, 'Edge count exceeds maxEdges (' + maxEdges + ').');
       } else if ((match = body.match(/^([A-Za-z0-9_-]+)\s*:\s*(.+)$/))) {
-        node(match[1], decode(match[2]), 'round');
+        node(match[1], decodeLabel(match[2]), 'round');
       } else if ((match = body.match(/^([A-Za-z0-9_-]+)\s*;?$/))) {
         node(match[1]);
       } else {
@@ -99,14 +108,14 @@ function buildGraph(source) {
       const opening = text[p], close = { '[': ']', '(': ')', '{': '}' }[opening];
       if (close) {
         p++;
-        const circle = opening === '(' && text[p] === '(';
-        if (circle) p++;
-        const label = readLabel(close);
-        if (circle) {
-          if (text[p] !== ')') fail(li + 1, 'Expected )) after circle label.');
+        const circle = opening === '(' && text[p] === '(', cylinder = opening === '[' && text[p] === '(';
+        if (circle || cylinder) p++;
+        const label = readLabel(cylinder ? ')' : close);
+        if (circle || cylinder) {
+          if (text[p] !== close) fail(li + 1, circle ? 'Expected )) after circle label.' : 'Expected )] after cylinder label.');
           p++;
         }
-        return node(id, label, circle ? 'circle' : opening === '(' ? 'round' : opening === '{' ? 'diamond' : 'rect');
+        return node(id, decodeLabel(label), circle ? 'circle' : cylinder ? 'cylinder' : opening === '(' ? 'round' : opening === '{' ? 'diamond' : 'rect');
       }
       return node(id);
     }
@@ -121,7 +130,7 @@ function buildGraph(source) {
           if (!match) fail(li + 1, 'Expected subgraph ID["Label"].');
           if (groupIds.has(match[1])) fail(li + 1, 'Duplicate subgraph ID: ' + match[1]);
           groupIds.add(match[1]);
-          subgraphs.push({ id: match[1], label: unquote((match[2] ?? match[1]).trim()), parent: groupStack.at(-1), line: li + 1 });
+          subgraphs.push({ id: match[1], label: decodeLabel(unquote((match[2] ?? match[1]).trim())).replace(/\n/g, ' '), parent: groupStack.at(-1), line: li + 1 });
           groupStack.push(subgraphs.length - 1); p += match[0].length;
         } else if (kind === 'direction') {
           const match = text.slice(p).match(/^(LR|RL|TB|TD|BT)\s*(?=;|%%|$)/);
@@ -185,7 +194,7 @@ function buildGraph(source) {
           if (label) fail(li + 1, 'Use either an inline label or a |label| on an edge.');
           p++; const end = text.indexOf('|', p); if (end < 0) fail(li + 1, 'Unclosed edge label.'); label = text.slice(p, end); p = end + 1;
         }
-        label = unquote(label.trim());
+        label = decodeLabel(unquote(label.trim()));
         const to = readNode(); edges.push({ from, to, label, arrow, startArrow, dotted });
         if (edges.length > maxEdges) fail(li + 1, 'Edge count exceeds maxEdges (' + maxEdges + ').');
         from = to; skip();
@@ -253,7 +262,7 @@ function buildGraph(source) {
   }
   function wrap(label) {
     const result = [];
-    for (const paragraph of label.split(/<br\s*\/?\s*>|\\n/i)) {
+    for (const paragraph of label.split('\n')) {
       let rest = paragraph;
       while (rest.length > 28) { let cut = rest.lastIndexOf(' ', 28); if (cut < 8) cut = 28; result.push(rest.slice(0, cut)); rest = rest.slice(cut).trimStart(); }
       result.push(rest);
@@ -261,7 +270,7 @@ function buildGraph(source) {
     return result;
   }
   const horizontal = direction === 'LR' || direction === 'RL';
-  for (const v of nodes) { v.lines = wrap(v.label); v.w = 240; v.h = Math.max(64, v.lines.length * 17 + 28); if (v.shape === 'diamond') { v.w = 300; v.h *= 1.65; } }
+  for (const v of nodes) { v.lines = wrap(v.label); v.w = 240; v.h = Math.max(64, v.lines.length * 17 + 28); if (v.shape === 'diamond') { v.w = 300; v.h *= 1.65; } if (v.shape === 'cylinder') v.h += 20; }
   for (const v of nodes) if (v.shape === 'start' || v.shape === 'end') { v.w = v.h = 24; v.lines = []; }
   for (const v of nodes) if (v.shape === 'circle') v.w = v.h = Math.max(64, v.lines.length * 17 + 28, ...v.lines.map(line => Array.from(line).length * 9 + 28));
   const layerSizes = layers.map(layer => ({ depth: layer.reduce((m, i) => Math.max(m, horizontal ? nodes[i].w : nodes[i].h), 0), breadth: layer.reduce((sum, i) => sum + (horizontal ? nodes[i].h : nodes[i].w) + 32, 0) - 32 }));
@@ -414,7 +423,7 @@ flowchart LR
       const i = Number(g.getAttribute('data-node')), selected = i === index;
       g.setAttribute('opacity', index === -1 || related.has(i) ? 1 : .2);
       g.setAttribute('aria-pressed', String(selected));
-      const shape = g.querySelector('rect, polygon, circle');
+      const shape = g.querySelector('rect, polygon, circle, path');
       shape.setAttribute('fill', selected ? '#365f62' : current.nodes[i].style?.fill || '#202f44');
       shape.setAttribute('stroke', selected ? '#9ff5cf' : index !== -1 && related.has(i) ? '#8cb9ff' : current.nodes[i].style?.stroke || '#87a9d7');
       shape.setAttribute('stroke-width', selected ? 3 : 1.3);
@@ -459,7 +468,12 @@ flowchart LR
     graph.edges.forEach((e, edgeIndex) => {
       const d = e.points.map((p, i) => `${i ? 'L' : 'M'}${p.x},${p.y}`).join(' ');
       const path = el('path', { d, 'data-edge': edgeIndex }); if (e.dotted) path.setAttribute('stroke-dasharray', '5 5'); if (e.startArrow) path.setAttribute('marker-start', 'url(#arrow)'); if (e.arrow) path.setAttribute('marker-end', 'url(#arrow)'); edgeGroup.append(path);
-      if (e.label) labels.append(el('text', { 'data-edge': edgeIndex, x: e.labelX, y: e.labelY - 6, fill: '#c3d5ec', 'font-size': 11, 'text-anchor': 'middle', stroke: '#10141c', 'stroke-width': 4, 'paint-order': 'stroke', 'stroke-linejoin': 'round' }, e.label));
+      if (e.label) {
+        // Multi-line labels grow upward so the last line keeps its place above the segment.
+        const lines = e.label.split('\n');
+        const text = el('text', { 'data-edge': edgeIndex, x: e.labelX, y: e.labelY - 6 - (lines.length - 1) * 13, fill: '#c3d5ec', 'font-size': 11, 'text-anchor': 'middle', stroke: '#10141c', 'stroke-width': 4, 'paint-order': 'stroke', 'stroke-linejoin': 'round' });
+        lines.forEach((line, i) => text.append(el('tspan', { x: e.labelX, dy: i ? 13 : 0 }, line))); labels.append(text);
+      }
     });
     for (const [i, v] of graph.nodes.entries()) {
       const g = el('g', { 'data-node': i, tabindex: 0, role: 'button', 'aria-label': v.id + ': ' + v.label + '. Highlight connections', 'aria-pressed': 'false', style: 'cursor: pointer' }); g.append(el('title', {}, v.id + ': ' + v.label));
@@ -470,8 +484,13 @@ flowchart LR
       }
       else if (v.shape === 'circle') g.append(el('circle', { ...attrs, cx: v.x + v.w / 2, cy: v.y + v.h / 2, r: v.w / 2 }));
       else if (v.shape === 'diamond') g.append(el('polygon', { ...attrs, points: `${v.x + v.w / 2},${v.y} ${v.x + v.w},${v.y + v.h / 2} ${v.x + v.w / 2},${v.y + v.h} ${v.x},${v.y + v.h / 2}` }));
+      else if (v.shape === 'cylinder') {
+        // Body outline with the bottom arc, then the visible front edge of the lid.
+        const rx = v.w / 2, body = v.h - 20;
+        g.append(el('path', { ...attrs, d: `M${v.x},${v.y + 10} a${rx},10 0 0 1 ${v.w},0 v${body} a${rx},10 0 0 1 ${-v.w},0 z m0,0 a${rx},10 0 0 0 ${v.w},0` }));
+      }
       else g.append(el('rect', { ...attrs, x: v.x, y: v.y, width: v.w, height: v.h, rx: v.shape === 'round' ? 24 : 7 }));
-      const text = el('text', { x: v.x + v.w / 2, y: v.y + v.h / 2 - (v.lines.length - 1) * 8.5 + 4, fill: v.style?.color || '#e2ecfa', 'font-size': 13, 'text-anchor': 'middle' });
+      const text = el('text', { x: v.x + v.w / 2, y: v.y + v.h / 2 - (v.lines.length - 1) * 8.5 + 4 + (v.shape === 'cylinder' ? 5 : 0), fill: v.style?.color || '#e2ecfa', 'font-size': 13, 'text-anchor': 'middle' });
       v.lines.forEach((line, i) => text.append(el('tspan', { x: v.x + v.w / 2, dy: i ? 17 : 0 }, line))); g.append(text); nodeGroup.append(g);
     }
     fragment.append(edgeGroup, labels, nodeGroup); scene.replaceChildren(fragment);

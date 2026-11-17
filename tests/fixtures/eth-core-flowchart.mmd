@@ -1,0 +1,15 @@
+  flowchart LR
+      subgraph core["eth_core.v (clocked, eth_rx_clk)"]
+          direction LR
+          regs["State registers<br/>state &lt;= next_state"]
+          next["eth_next<br/>(bitlogic, combinational)"]
+          bram[("BRAM<br/>dout = mem[addr]<br/>1-cycle latency")]
+
+          regs -- "state" --> next
+          next -- "next_state" --> regs
+          next -- "ram_addr, ram_en,<br/>ram_we, ram_din" --> bram
+          bram -- "ram_dout<br/>(registered, next cycle)" --> next
+      end
+
+      mii_in["MII RX<br/>eth_rx_dv, eth_rxd"] --> next
+      next --> mii_out["MII TX<br/>eth_tx_en, eth_txd"]
