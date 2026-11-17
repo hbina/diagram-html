@@ -1,0 +1,125 @@
+flowchart TD
+      MD["Ethernet market data"]
+      EX["Exchange"]
+      RX["Ethernet RX<br/>FDK port and CRC/timestamp alignment"]
+
+      MD --> RX
+      EX -->|"TCP packets and exchange replies"| RX
+
+      subgraph DECISION["Market data and strategy — RX clock"]
+          A["A — Parse and filter<br/>UDP channel, framing, sequence and faults"]
+          B["B — Watched-token lookup"]
+          C["C — Market and inventory snapshot"]
+          DEF["D / E / F — Strategy<br/>Ordered rule expansion<br/>One evaluator"]
+
+          A --> B --> C --> DEF --> G["G — Local risk and atomic commitment"]
+
+          AS["T1 — RX/channel state: 256 channels<br/>Channel sequencing, freshness and status"]
+          BS["T2 — Watched-token map: 32 tokens<br/>Token to ticker/slot route"]
+          CS["T3 — Market cache: 32 ticker rows<br/>Prices, quantities, revision and status<br/>T4 — Inventory view: 32 ticker rows"]
+          DS["T5 — Strategy definitions: 32 ticker rows<br/>Ordered rules, thresholds and actions<br/>T6 — Strategy state: 32 ticker rows"]
+          GA["T7 — Authorizations: 32 ticker rows<br/>Limits, enable and active version"]
+          GR["T8 — Risk/commit state: 32 ticker rows<br/>Inventory, reservations and lease sequence"]
+          GO["T9 — Local orders: 2048 order rows<br/>Lifecycle, quantities and ownership"]
+          GX["T10 — Order route directory: 2048 rows<br/>Slot/generation, ticker and current lease"]
+          GS["Scalar/working state:<br/>Current proposal and atomic commit context"]
+
+          A -.->|"owns"| AS
+          B -.->|"owns"| BS
+          C -.->|"owns"| CS
+          DEF -.->|"owns"| DS
+          G -.->|"owns"| GA
+          G -.->|"owns"| GR
+          G -.->|"owns"| GO
+          G -.->|"owns and services queries"| GX
+          G -.->|"owns"| GS
+      end
+
+      subgraph REQUEST["Order request preparation — RX clock"]
+          H["H — Prepare request<br/>Binding, profile and session allocation"]
+          I["I — Encode and AES-GCM encrypt"]
+          J["J — Coherent payload CDC"]
+
+          H --> I --> J
+
+          HP["T19 — Profiles/templates: 32 ticker rows"]
+          HB["T20 — Request bindings: 2048 order rows<br/>Local reference to ticker, attempt and frame sequence<br/>Session/generation checked"]
+          HS["Scalar state: one TX session<br/>Key, AAD, sequence and IV allocation"]
+          IS["Working state:<br/>AES/GCM context and current request<br/>Twelve-word ciphertext collector"]
+          JS["Working state:<br/>Coherent mailbox payload and ownership<br/>Source/destination register copies"]
+
+          H -.->|"owns"| HP
+          H -.->|"owns and services queries"| HB
+          H -.->|"owns"| HS
+          H -.->|"queries through G"| GX
+          I -.->|"owns"| IS
+          J -.->|"owns"| JS
+      end
+
+      G -->|"Committed order and provenance"| H
+
+      subgraph TRANSMIT["Transmission — TX clock"]
+          K["K — Native TCP and send authority<br/>Connection row, sequence, window<br/>Rate, kill and session checks"]
+          L["L — MAC frame owner<br/>Presentation and actual acceptance"]
+
+          K --> L
+          L -.->|"Accepted bytes and terminal facts"| K
+
+          KT["T21 — TCP connection rows: 512 connections<br/>Addresses, ports, SEQ, ACK/window and control<br/>T22 — TCP timing-state mirror: 512 rows<br/>SEQ and available sequence space"]
+          KR["T23 — Rate history: 1024 entries<br/>One rate domain<br/>Timestamp and weight ring"]
+          KS["Scalar/working state:<br/>Installed binding, rate configuration and kill lifecycle<br/>Current packet, lease and serial reservation"]
+          LS["Working state:<br/>One frame context<br/>Two word slots and three pending wire facts"]
+
+          K -.->|"owns"| KT
+          K -.->|"owns"| KR
+          K -.->|"owns"| KS
+          L -.->|"owns"| LS
+      end
+
+      J -->|"Complete packet and context"| K
+      L --> PORT["FDK Ethernet TX arbitration"]
+      PORT -->|"Outgoing order request"| EX
+
+      subgraph RESPONSE["Exchange response processing — RX clock"]
+          TCPRX["TCP receive capture<br/>Ordered payload and repair handling"]
+          AUTH["Authenticate, decrypt and decode"]
+          APPLY["Correlate response<br/>Directory and leased outcome application"]
+
+          TCPRX --> AUTH --> APPLY
+
+          RB["Buffer/stream state:<br/>Two raw TCP frame slots<br/>Receive cursor and repair context"]
+          RS["Scalar/working state:<br/>RX session/key, sequence and IV progress<br/>Current authenticated record"]
+          RD["T24 — Exchange-order dictionary: 2048 entries<br/>Exchange order number to local order route<br/>AVL nodes plus slot/generation and free-node metadata"]
+          RP["T25 — Pending prerequisites: 16 entries<br/>Deferred replies keyed by exchange order<br/>Required fill progress, order and lease state"]
+
+          TCPRX -.->|"owns"| RB
+          AUTH -.->|"owns"| RS
+          APPLY -.->|"owns"| RD
+          APPLY -.->|"owns"| RP
+          APPLY -.->|"binding queries through H"| HB
+      end
+
+      RX -->|"Exchange TCP payload"| TCPRX
+      APPLY -->|"Accepted exchange outcome"| G
+      APPLY -.->|"Scoped session fence through control CDC"| K
+
+      K -.-> DONE["Completion CDC<br/>Accounting, then exact credit release"]
+      DONE -.-> G
+      DONE -.-> DSRET["Working state:<br/>Completion mailbox and held accounting/release result"]
+
+      G -.-> INV["Registered inventory publication"]
+      INV -.-> C
+      INV -.-> INVS["T26 — Publication metadata: 32 tickers<br/>Dirty hints, version frontiers and known tokens"]
+
+      HOST["CPU software TCP stack<br/>Connection setup, ACK/window updates and recovery"]
+
+      RX -->|"Raw received-packet copies"| HOST
+      HOST -->|"Software Ethernet frames"| PORT
+      PORT -->|"Mandatory copies of FPGA-generated packets"| HOST
+      HOST -.->|"TCP connection-row commands through CPU control"| K
+
+      classDef tableState fill:#fff3cd,stroke:#ad7b00,color:#302400;
+      classDef workState fill:#eef1f5,stroke:#768391,color:#243442;
+
+      class AS,BS,CS,DS,GA,GR,GO,GX,HP,HB,KT,KR,RD,RP,INVS tableState;
+      class GS,HS,IS,JS,KS,LS,RB,RS,DSRET workState;

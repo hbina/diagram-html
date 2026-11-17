@@ -35,7 +35,11 @@
         <p><code>%%</code> comments and a leading YAML header with <code>maxEdges</code> / <code>maxTextSize</code> are
           accepted. Other header entries are ignored. Labels are plain text; quoted labels can contain punctuation. Node
           labels support <code>&lt;br/&gt;</code> line breaks.
-          Subgraphs, styling directives and other diagram types are unsupported and report errors.</p>
+          Quoted edge labels are supported. Group nodes with <code>subgraph ID["Label"]</code> and
+          <code>end</code>; nested groups are accepted. Groups use consecutive rows or columns with up to four nodes per band.</p>
+        <p>Define colors with <code>classDef name fill:#fff3cd,stroke:#ad7b00,color:#302400;</code>
+          and apply them with <code>class a,b name;</code>. These three properties accept hex or named colors.
+          Other styling directives and diagram types are unsupported and report errors.</p>
         <p>Defaults: 20,000 edges, 1,000,000 source characters. Layout uses layers, including cycle grouping.
           Connections use right-angle turns and route around blocks. Dense
           graphs may have overlapping edges; rendering time depends on graph size and your device. Text stays in your

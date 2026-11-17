@@ -20,13 +20,19 @@ function buildGraph(source) {
     first = end + 1;
   }
   if (source.length > maxTextSize) throw new Error('Source exceeds maxTextSize (' + maxTextSize + ').');
-  const nodes = [], edges = [], ids = new Map();
+  const nodes = [], edges = [], ids = new Map(), subgraphs = [], groupStack = [], groupIds = new Set();
+  const classDefs = new Map(), assignments = [];
   let direction = null;
   function node(id, label, shape) {
-    if (!ids.has(id)) { ids.set(id, nodes.length); nodes.push({ id, label: id, shape: 'rect' }); }
+    const created = !ids.has(id);
+    if (created) { ids.set(id, nodes.length); nodes.push({ id, label: id, shape: 'rect' }); }
     const index = ids.get(id);
     if (label !== undefined) Object.assign(nodes[index], { label, shape });
+    if (groupStack.length && nodes[index].group === undefined && (created || label !== undefined)) nodes[index].group = groupStack[groupStack.length - 1];
     return index;
+  }
+  function unquote(label) {
+    return label.startsWith('"') && label.endsWith('"') ? label.slice(1, -1).replace(/\\(["\\])/g, '$1') : label;
   }
   for (let li = first; li < lines.length; li++) {
     const text = lines[li]; let p = 0;
@@ -67,6 +73,44 @@ function buildGraph(source) {
     while (p < text.length) {
       skip(); if (text.startsWith('%%', p)) break;
       if (text[p] === ';') { p++; continue; }
+      const directive = text.slice(p).match(/^(subgraph|end|classDef|class)\b/);
+      if (directive) {
+        const kind = directive[1]; p += kind.length; skip();
+        if (kind === 'subgraph') {
+          const match = text.slice(p).match(/^([A-Za-z0-9_-]+)(?:\s*\[\s*("(?:\\.|[^"\\])*"|[^\]]*)\s*\])?\s*(?=;|%%|$)/);
+          if (!match) fail(li + 1, 'Expected subgraph ID["Label"].');
+          if (groupIds.has(match[1])) fail(li + 1, 'Duplicate subgraph ID: ' + match[1]);
+          groupIds.add(match[1]);
+          subgraphs.push({ id: match[1], label: unquote((match[2] ?? match[1]).trim()), parent: groupStack.at(-1), line: li + 1 });
+          groupStack.push(subgraphs.length - 1); p += match[0].length;
+        } else if (kind === 'end') {
+          if (!groupStack.length) fail(li + 1, 'Unexpected subgraph end.');
+          groupStack.pop();
+        } else {
+          const end = text.indexOf(';', p), comment = text.indexOf('%%', p);
+          const stop = Math.min(end < 0 ? text.length : end, comment < 0 ? text.length : comment);
+          const body = text.slice(p, stop).trim();
+          if (kind === 'classDef') {
+            const match = body.match(/^([A-Za-z0-9_-]+)\s+(.+)$/);
+            if (!match) fail(li + 1, 'Expected classDef name fill:color,stroke:color,color:color.');
+            const style = {};
+            for (const entry of match[2].split(',')) {
+              const property = entry.trim().match(/^(fill|stroke|color)\s*:\s*(#[0-9a-fA-F]{3,8}|[A-Za-z]+)$/);
+              if (!property) fail(li + 1, 'Supported class properties: fill, stroke, color with hex or named colors.');
+              style[property[1]] = property[2];
+            }
+            classDefs.set(match[1], style);
+          } else {
+            const match = body.match(/^([A-Za-z0-9_-]+(?:\s*,\s*[A-Za-z0-9_-]+)*)\s+([A-Za-z0-9_-]+)$/);
+            if (!match) fail(li + 1, 'Expected class node1,node2 className.');
+            assignments.push({ ids: match[1].split(/\s*,\s*/), name: match[2], line: li + 1 });
+          }
+          p = stop;
+        }
+        skip();
+        if (p < text.length && text[p] !== ';' && !text.startsWith('%%', p)) fail(li + 1, 'Unsupported syntax near ' + text.slice(p));
+        continue;
+      }
       let from = readNode(); skip();
       while (text.startsWith('<-->', p) || text.startsWith('-->', p) || text.startsWith('---', p) || text.startsWith('-.', p)) {
         let arrow = true, startArrow = false, dotted = false, label = '';
@@ -87,11 +131,22 @@ function buildGraph(source) {
           if (label) fail(li + 1, 'Use either an inline label or a |label| on an edge.');
           p++; const end = text.indexOf('|', p); if (end < 0) fail(li + 1, 'Unclosed edge label.'); label = text.slice(p, end); p = end + 1;
         }
+        label = unquote(label.trim());
         const to = readNode(); edges.push({ from, to, label, arrow, startArrow, dotted });
         if (edges.length > maxEdges) fail(li + 1, 'Edge count exceeds maxEdges (' + maxEdges + ').');
         from = to; skip();
       }
       if (p < text.length && text[p] !== ';' && !text.startsWith('%%', p)) fail(li + 1, 'Unsupported syntax near ' + text.slice(p, p + 60));
+    }
+  }
+  if (groupStack.length) fail(subgraphs[groupStack[0]].line, 'Unclosed subgraph. Expected end.');
+  for (const assignment of assignments) {
+    const style = classDefs.get(assignment.name);
+    if (!style) fail(assignment.line, 'Unknown class: ' + assignment.name);
+    for (const id of assignment.ids) {
+      const target = ids.has(id) ? nodes[ids.get(id)] : subgraphs.find(group => group.id === id);
+      if (!target) fail(assignment.line, 'Unknown class target: ' + id);
+      target.style = { ...target.style, ...style };
     }
   }
   if (!direction || !nodes.length) throw new Error('Enter a flowchart header and at least one node.');
@@ -121,6 +176,18 @@ function buildGraph(source) {
   for (let q = 0; q < queue.length; q++) { const c = queue[q]; for (const d of successors[c]) { ranks[d] = Math.max(ranks[d], ranks[c] + 1); if (!--indegree[d]) queue.push(d); } }
   const layers = [];
   nodes.forEach((v, i) => { v.rank = ranks[component[i]]; (layers[v.rank] ||= []).push(i); });
+  if (subgraphs.length) {
+    // Keep each group's contents in consecutive bands, including nested groups.
+    // Bounded rows keep large ownership diagrams usable at ordinary zoom levels.
+    layers.length = 0;
+    function bands(parent) {
+      const members = nodes.map((v, i) => i).filter(i => nodes[i].group === parent);
+      for (let i = 0; i < members.length; i += 4) layers.push(members.slice(i, i + 4));
+      subgraphs.forEach((group, i) => { if (group.parent === parent) bands(i); });
+    }
+    bands(undefined);
+    layers.forEach((layer, rank) => layer.forEach(i => { nodes[i].rank = rank; }));
+  }
   const order = new Float64Array(n); layers.forEach(layer => layer.forEach((v, i) => order[v] = i));
   for (let pass = 0; pass < 4; pass++) {
     const forward = pass % 2 === 0;
@@ -147,11 +214,17 @@ function buildGraph(source) {
   for (const e of edges) {
     const from = nodes[e.from].rank, to = nodes[e.to].rank;
     outgoingLanes[from]++;
-    if (to > from + 1) { incomingLanes[to]++; longEdges++; }
+    if (to !== from && to !== from + 1) { incomingLanes[to]++; longEdges++; }
   }
-  const outerMargin = 40 + longEdges * 16;
+  const groupDepth = subgraphs.reduce((max, group) => {
+    let depth = 1, parent = group.parent;
+    while (parent !== undefined) { depth++; parent = subgraphs[parent].parent; }
+    return Math.max(max, depth);
+  }, 0);
+  const groupPadding = groupDepth * 48;
+  const outerMargin = 40 + longEdges * 16 + groupPadding;
   const breadth = layerSizes.reduce((m, s) => Math.max(m, s.breadth), 0);
-  let depth = 40, depthEnd = 40;
+  let depth = 40 + groupPadding + 16 * incomingLanes[0], depthEnd = depth;
   layers.forEach((layer, r) => {
     let b = outerMargin + (breadth - layerSizes[r].breadth) / 2;
     for (const i of layer) {
@@ -160,11 +233,11 @@ function buildGraph(source) {
     }
     depthEnd = depth + layerSizes[r].depth;
     // Reserve separate tracks for outgoing and incoming connections.
-    depth = depthEnd + Math.max(150, 64 + 16 * (outgoingLanes[r] + (incomingLanes[r + 1] || 0)));
+    depth = depthEnd + Math.max(150, 64 + 16 * (outgoingLanes[r] + (incomingLanes[r + 1] || 0))) + groupPadding * 2;
   });
-  const fullDepth = depthEnd + 40 + 16 * outgoingLanes[layers.length - 1];
-  const width = horizontal ? fullDepth : breadth + outerMargin + 40;
-  const height = horizontal ? breadth + outerMargin + 40 : fullDepth;
+  const fullDepth = depthEnd + 40 + groupPadding + 16 * outgoingLanes[layers.length - 1];
+  const width = horizontal ? fullDepth : breadth + outerMargin + 40 + groupPadding;
+  const height = horizontal ? breadth + outerMargin + 40 + groupPadding : fullDepth;
   // Route in depth/breadth coordinates before mirroring the diagram. Every
   // layer has an empty channel after its widest node. Long edges use the
   // outer margin, so they cannot cut through intervening layers.
@@ -226,7 +299,15 @@ function buildGraph(source) {
     }
   }
   for (const v of nodes) { if (direction === 'RL') v.x = width - v.x - v.w; if (direction === 'BT') v.y = height - v.y - v.h; }
-  return { nodes, edges, direction, width, height };
+  for (let i = subgraphs.length - 1; i >= 0; i--) {
+    const group = subgraphs[i], contents = [...nodes.filter(v => v.group === i), ...subgraphs.filter(g => g.parent === i && g.w !== undefined)];
+    if (!contents.length) continue;
+    group.x = Math.min(...contents.map(v => v.x)) - 20;
+    group.y = Math.min(...contents.map(v => v.y)) - 42;
+    group.w = Math.max(...contents.map(v => v.x + v.w)) + 20 - group.x;
+    group.h = Math.max(...contents.map(v => v.y + v.h)) + 20 - group.y;
+  }
+  return { nodes, edges, subgraphs, direction, width, height };
 }
 // Keep DOM setup separate so Node tests can load the graph builder directly.
 function initializeEditor() {
@@ -275,8 +356,8 @@ flowchart LR
       g.setAttribute('opacity', index === -1 || related.has(i) ? 1 : .2);
       g.setAttribute('aria-pressed', String(selected));
       const shape = g.querySelector('rect, polygon');
-      shape.setAttribute('fill', selected ? '#365f62' : '#202f44');
-      shape.setAttribute('stroke', selected ? '#9ff5cf' : index !== -1 && related.has(i) ? '#8cb9ff' : '#87a9d7');
+      shape.setAttribute('fill', selected ? '#365f62' : current.nodes[i].style?.fill || '#202f44');
+      shape.setAttribute('stroke', selected ? '#9ff5cf' : index !== -1 && related.has(i) ? '#8cb9ff' : current.nodes[i].style?.stroke || '#87a9d7');
       shape.setAttribute('stroke-width', selected ? 3 : 1.3);
     });
     scene.querySelectorAll('[data-edge]').forEach(element => {
@@ -293,6 +374,15 @@ flowchart LR
     drag = null;
     const fragment = document.createDocumentFragment(), defs = el('defs'), marker = el('marker', { id: 'arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
     marker.append(el('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#849bb9' })); defs.append(marker); fragment.append(defs);
+    const groups = el('g');
+    for (const group of graph.subgraphs || []) {
+      if (group.w === undefined) continue;
+      const g = el('g', { 'data-subgraph': group.id });
+      g.append(el('rect', { x: group.x, y: group.y, width: group.w, height: group.h, rx: 10, fill: group.style?.fill || '#171e29', stroke: group.style?.stroke || '#536780', 'stroke-width': 1.3 }));
+      g.append(el('text', { x: group.x + 14, y: group.y + 25, fill: group.style?.color || '#dce5f3', 'font-size': 14 }, group.label));
+      groups.append(g);
+    }
+    fragment.append(groups);
     const edgeGroup = el('g', { fill: 'none', stroke: '#637c9c', 'stroke-width': 1.4, 'stroke-linejoin': 'miter' }), labels = el('g'), nodeGroup = el('g');
     graph.edges.forEach((e, edgeIndex) => {
       const d = e.points.map((p, i) => `${i ? 'L' : 'M'}${p.x},${p.y}`).join(' ');
@@ -301,10 +391,10 @@ flowchart LR
     });
     for (const [i, v] of graph.nodes.entries()) {
       const g = el('g', { 'data-node': i, tabindex: 0, role: 'button', 'aria-label': v.id + ': ' + v.label + '. Highlight connections', 'aria-pressed': 'false', style: 'cursor: pointer' }); g.append(el('title', {}, v.id + ': ' + v.label));
-      const attrs = { fill: '#202f44', stroke: '#87a9d7', 'stroke-width': 1.3 };
+      const attrs = { fill: v.style?.fill || '#202f44', stroke: v.style?.stroke || '#87a9d7', 'stroke-width': 1.3 };
       if (v.shape === 'diamond') g.append(el('polygon', { ...attrs, points: `${v.x + v.w / 2},${v.y} ${v.x + v.w},${v.y + v.h / 2} ${v.x + v.w / 2},${v.y + v.h} ${v.x},${v.y + v.h / 2}` }));
       else g.append(el('rect', { ...attrs, x: v.x, y: v.y, width: v.w, height: v.h, rx: v.shape === 'round' ? 24 : 7 }));
-      const text = el('text', { x: v.x + v.w / 2, y: v.y + v.h / 2 - (v.lines.length - 1) * 8.5 + 4, fill: '#e2ecfa', 'font-size': 13, 'text-anchor': 'middle' });
+      const text = el('text', { x: v.x + v.w / 2, y: v.y + v.h / 2 - (v.lines.length - 1) * 8.5 + 4, fill: v.style?.color || '#e2ecfa', 'font-size': 13, 'text-anchor': 'middle' });
       v.lines.forEach((line, i) => text.append(el('tspan', { x: v.x + v.w / 2, dy: i ? 17 : 0 }, line))); g.append(text); nodeGroup.append(g);
     }
     fragment.append(edgeGroup, labels, nodeGroup); scene.replaceChildren(fragment);
