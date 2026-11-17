@@ -214,7 +214,8 @@ function buildGraph(source) {
   for (const e of edges) {
     const from = nodes[e.from].rank, to = nodes[e.to].rank;
     outgoingLanes[from]++;
-    if (to !== from && to !== from + 1) { incomingLanes[to]++; longEdges++; }
+    incomingLanes[to]++;
+    if (to !== from + 1) longEdges++;
   }
   const groupDepth = subgraphs.reduce((max, group) => {
     let depth = 1, parent = group.parent;
@@ -256,24 +257,26 @@ function buildGraph(source) {
     return { x, y };
   }
   const usedOutgoing = new Int32Array(layers.length), usedIncoming = new Int32Array(layers.length);
+  // All connections of a node share one output bus and one input bus.
+  // Input buses stay before the layer; output buses stay after it, even
+  // for feedback, self-loops and connections within the same layer.
+  const outputBus = new Map(), inputBus = new Map();
+  for (const e of edges) {
+    const fromRank = nodes[e.from].rank, toRank = nodes[e.to].rank;
+    if (!outputBus.has(e.from)) outputBus.set(e.from, channels[fromRank].after + 16 * usedOutgoing[fromRank]++);
+    if (!inputBus.has(e.to)) inputBus.set(e.to, channels[toRank].before - 16 * usedIncoming[toRank]++);
+  }
   let usedOuter = 0;
   for (const e of edges) {
     const a = boxes[e.from], b = boxes[e.to];
     const fromRank = nodes[e.from].rank, toRank = nodes[e.to].rank;
     const av = a.v + a.breadth / 2, bv = b.v + b.breadth / 2;
-    const exit = channels[fromRank].after + 16 * usedOutgoing[fromRank]++;
+    const exit = outputBus.get(e.from), entry = inputBus.get(e.to);
     let route;
-    if (e.from === e.to) {
-      // Return through the adjacent side, using the empty gap above the node.
-      route = [[a.u + a.depth, av], [exit, av], [exit, a.v - 16],
-      [a.u + a.depth / 2, a.v - 16], [a.u + a.depth / 2, a.v]];
-    } else if (fromRank === toRank) {
-      route = [[a.u + a.depth, av], [exit, av], [exit, bv], [b.u + b.depth, bv]];
-    } else if (toRank === fromRank + 1) {
-      const middle = exit;
-      route = [[a.u + a.depth, av], [middle, av], [middle, bv], [b.u, bv]];
+    if (toRank === fromRank + 1) {
+      // Bridge the two buses in the empty inter-layer channel.
+      route = [[a.u + a.depth, av], [exit, av], [exit, bv], [entry, bv], [b.u, bv]];
     } else {
-      const entry = channels[toRank].before - 16 * usedIncoming[toRank]++;
       const outer = 16 + 16 * usedOuter++;
       route = [[a.u + a.depth, av], [exit, av], [exit, outer],
       [entry, outer], [entry, bv], [b.u, bv]];

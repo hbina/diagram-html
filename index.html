@@ -41,7 +41,8 @@
           and apply them with <code>class a,b name;</code>. These three properties accept hex or named colors.
           Other styling directives and diagram types are unsupported and report errors.</p>
         <p>Defaults: 20,000 edges, 1,000,000 source characters. Layout uses layers, including cycle grouping.
-          Connections use right-angle turns and route around blocks. Dense
+          Connections use right-angle turns and route around blocks. Inputs merge on the leading side of each block;
+          outputs share a separate line on the trailing side, including feedback connections. Dense
           graphs may have overlapping edges; rendering time depends on graph size and your device. Text stays in your
           browser. Nothing is sent or stored automatically.</p>
       </details>

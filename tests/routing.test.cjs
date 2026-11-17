@@ -12,6 +12,23 @@ function verify(source) {
   const graph = buildGraph(source);
   for (const edge of graph.edges) {
     assert(edge.points.length >= 2);
+    const from = graph.nodes[edge.from], to = graph.nodes[edge.to];
+    const start = edge.points[0], next = edge.points[1], end = edge.points.at(-1), previous = edge.points.at(-2);
+    // Inputs merge on the leading face, outputs on the trailing face.
+    // This also applies when cycles put both endpoints in the same layer.
+    if (graph.direction === 'LR') {
+      assert(Math.abs(start.x - (from.x + from.w)) < 1e-7); assert(Math.abs(end.x - (to.x)) < 1e-7);
+      assert(next.x > start.x && previous.x < end.x);
+    } else if (graph.direction === 'RL') {
+      assert(Math.abs(start.x - (from.x)) < 1e-7); assert(Math.abs(end.x - (to.x + to.w)) < 1e-7);
+      assert(next.x < start.x && previous.x > end.x);
+    } else if (graph.direction === 'BT') {
+      assert(Math.abs(start.y - (from.y)) < 1e-7); assert(Math.abs(end.y - (to.y + to.h)) < 1e-7);
+      assert(next.y < start.y && previous.y > end.y);
+    } else {
+      assert(Math.abs(start.y - (from.y + from.h)) < 1e-7); assert(Math.abs(end.y - (to.y)) < 1e-7);
+      assert(next.y > start.y && previous.y < end.y);
+    }
     for (let i = 1; i < edge.points.length; i++) {
       const a = edge.points[i - 1], b = edge.points[i];
       assert(a.x === b.x || a.y === b.y, 'Each segment must be orthogonal');
@@ -45,6 +62,12 @@ A --> B --> C --> D --> E --> F --> G
 end`);
   assert.equal(insideK.nodes.length, 7);
   assert.equal(insideK.edges.length, 6);
+  const merging = verify(`flowchart ${direction}\na --> center\nb --> center\ncenter --> c\ncenter --> d\nc --> a\ncenter --> center`);
+  const inputs = merging.edges.filter(e => merging.nodes[e.to].id === 'center');
+  const outputs = merging.edges.filter(e => merging.nodes[e.from].id === 'center');
+  for (const edge of inputs) assert.deepEqual(edge.points.at(-1), inputs[0].points.at(-1), 'Inputs must merge at a common port');
+  for (const edge of outputs) assert.deepEqual(edge.points[0], outputs[0].points[0], 'Outputs must split from a common port');
+  assert.notDeepEqual(inputs[0].points.at(-1), outputs[0].points[0], 'Input and output ports must be separate');
   const ethernet = verify(ethernetFixture.replace('flowchart TD', 'flowchart ' + direction));
   assert.equal(ethernet.subgraphs.length, 4);
   assert.equal(ethernet.nodes.filter(v => v.style?.fill === '#fff3cd').length, 15);
