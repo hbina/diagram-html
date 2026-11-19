@@ -11,6 +11,7 @@ const stateFixture = fs.readFileSync(path.join(__dirname, 'fixtures/task-state.m
 const ethCoreFixture = fs.readFileSync(path.join(__dirname, 'fixtures/eth-core-flowchart.mmd'), 'utf8');
 const sequenceFixture = fs.readFileSync(path.join(__dirname, 'fixtures/agent-sequence.mmd'), 'utf8');
 const recallFixture = fs.readFileSync(path.join(__dirname, 'fixtures/recall-flowchart.mmd'), 'utf8');
+const pipelineFixture = fs.readFileSync(path.join(__dirname, 'fixtures/pipeline-flowchart.mmd'), 'utf8');
 const transformerFixture = fs.readFileSync(path.join(__dirname, 'fixtures/transformer-flowchart.mmd'), 'utf8');
 let checked = 0;
 function verify(source) {
@@ -334,5 +335,13 @@ for (const edge of renderedEdges) {
   assert.equal(recall.nodes.find(v => v.id === 'PLAN').label.split('\n').at(-1), '(contract failure → raw message, no keywords)');
   assert.equal(recall.nodes.find(v => v.id === 'RR').label.split('\n').at(-1), 'unknown / duplicate IDs → error');
   assert.throws(() => buildGraph('flowchart LR\n  a["open\n  b --> c'), /Line 2: Unclosed quoted label/);
+}
+{
+  const pipeline = verify(pipelineFixture);
+  assert.equal(pipeline.nodes.length, 24);
+  assert.equal(pipeline.edges.length, 28);
+  assert.equal(pipeline.subgraphs.length, 4);
+  assert.deepEqual(pipeline.nodes.filter(v => v.shape === 'subroutine').map(v => v.label), ['llama-server (chat)\nOpenAI-compatible', 'llama-server (embeddings)']);
+  assert.throws(() => buildGraph('flowchart LR\n  a[[Label]'), /Line 2: Expected \]\] after subroutine label/);
 }
 console.log(`Passed: ${checked} orthogonal segments avoid every block, across all directions, feedback cycles, self-loops, long edges, and varying node sizes.`);

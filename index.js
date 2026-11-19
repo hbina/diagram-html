@@ -254,13 +254,14 @@ function buildGraph(source) {
       if (close) {
         p++;
         const circle = opening === '(' && text[p] === '(', cylinder = opening === '[' && text[p] === '(';
-        if (circle || cylinder) p++;
+        const subroutine = opening === '[' && text[p] === '[';
+        if (circle || cylinder || subroutine) p++;
         const label = readLabel(cylinder ? ')' : close);
-        if (circle || cylinder) {
-          if (text[p] !== close) fail(li + 1, circle ? 'Expected )) after circle label.' : 'Expected )] after cylinder label.');
+        if (circle || cylinder || subroutine) {
+          if (text[p] !== close) fail(li + 1, circle ? 'Expected )) after circle label.' : cylinder ? 'Expected )] after cylinder label.' : 'Expected ]] after subroutine label.');
           p++;
         }
-        return node(id, decodeLabel(label), circle ? 'circle' : cylinder ? 'cylinder' : opening === '(' ? 'round' : opening === '{' ? 'diamond' : 'rect');
+        return node(id, decodeLabel(label), circle ? 'circle' : cylinder ? 'cylinder' : subroutine ? 'subroutine' : opening === '(' ? 'round' : opening === '{' ? 'diamond' : 'rect');
       }
       return node(id);
     }
@@ -651,6 +652,10 @@ flowchart LR
         g.append(el('path', { ...attrs, d: `M${v.x},${v.y + 10} a${rx},10 0 0 1 ${v.w},0 v${body} a${rx},10 0 0 1 ${-v.w},0 z m0,0 a${rx},10 0 0 0 ${v.w},0` }));
       }
       else g.append(el('rect', { ...attrs, x: v.x, y: v.y, width: v.w, height: v.h, rx: v.shape === 'round' ? 24 : 7 }));
+      if (v.shape === 'subroutine') {
+        // Subroutines repeat the side edges just inside the box.
+        for (const x of [v.x + 10, v.x + v.w - 10]) g.append(el('line', { x1: x, x2: x, y1: v.y, y2: v.y + v.h, stroke: attrs.stroke, 'stroke-width': 1.3, 'pointer-events': 'none' }));
+      }
       const text = el('text', { x: v.x + v.w / 2, y: v.y + v.h / 2 - (v.lines.length - 1) * 8.5 + 4 + (v.shape === 'cylinder' ? 5 : 0), fill: v.style?.color || '#e2ecfa', 'font-size': 13, 'text-anchor': 'middle' });
       v.lines.forEach((line, i) => text.append(el('tspan', { x: v.x + v.w / 2, dy: i ? 17 : 0 }, line))); g.append(text); nodeGroup.append(g);
     }

@@ -1,0 +1,59 @@
+ flowchart TD
+      TG[("Telegram Bot API")]
+
+      subgraph INGRESS["1. Ingress (channels.rs: TelegramAdapter::polling_loop)"]
+          POLL["getUpdates long-poll<br/>offset from SQLite checkpoint"]
+          ADMIT{"telegram_inbound_message<br/>private chat? sender == owner?<br/>chat == owner? text non-empty,<br/>size limits, valid
+  timestamp"}
+          SKIP["advance checkpoint only<br/>(ignored / rejected)"]
+          NORM["InboundMessage<br/>+ ReplyContext (author: Assistant/User/Other,<br/>reply body, quoted selection)"]
+          QUEUE["store.record_inbound_message<br/>durable inbound queue + dedupe<br/>(Inserted / Active / Completed / Retryable)"]
+      end
+
+      subgraph WORKER["2. Inbound worker (server.rs)"]
+          CLAIM["claim_oldest_inbound<br/>lease owner + generation"]
+          HB["heartbeat: refresh_inbound_lease"]
+      end
+
+      subgraph AGENT["3. Agent (agent.rs: handle_inbound_claim → prepare_chat)"]
+          LOCK["per-conversation lock"]
+          TRACE["start_or_resume_inbound_trace<br/>save user turn to transcript"]
+          RESUME{"stored output<br/>already exists?"}
+          CTX["contextual_messages<br/>(token-budgeted context assembly)"]
+          LOOP["agent round loop<br/>generate(tool_choice=auto)"]
+          TOOLS["ToolExecutor.execute_and_record<br/>tasks / reminders / memory"]
+          POST["post-process reply<br/>trim → qualify IDs → commitment guards"]
+          OUT["record_response_output"]
+          CHUNK["prepare_current_exchange<br/>embed exchange chunks for recall"]
+      end
+
+      subgraph DELIVERY["4. Delivery"]
+          PREP["prepare_delivery → mark_delivery_attempting"]
+          SEND["TelegramAdapter.send_message<br/>Markdown **bold** → Telegram entities"]
+          DONE["complete_inbound_delivery_indexed<br/>(assistant turn + vector index + claim done, atomically)"]
+          FAIL["fail_delivery / fail_inbound_claim<br/>→ retryable or permanently failed"]
+      end
+
+      TG --> POLL --> ADMIT
+      ADMIT -- "no / unsupported" --> SKIP
+      ADMIT -- "yes" --> NORM --> QUEUE
+      QUEUE -.->|poll interval| CLAIM --> LOCK
+      CLAIM --- HB
+      LOCK --> TRACE --> RESUME
+      RESUME -- "yes (retry after crash)" --> CHUNK
+      RESUME -- "no" --> CTX --> LOOP
+      LOOP -- "tool_calls" --> TOOLS -- "tool results appended" --> LOOP
+      LOOP -- "final text" --> POST --> OUT --> CHUNK
+      CHUNK --> PREP --> SEND
+      SEND -- ok --> DONE --> TG
+      SEND -- error --> FAIL
+
+      DB[("SQLite<br/>single state authority")]
+      LLM[["llama-server (chat)<br/>OpenAI-compatible"]]
+      EMB[["llama-server (embeddings)"]]
+
+      QUEUE --- DB
+      TOOLS --- DB
+      DONE --- DB
+      LOOP --- LLM
+      CHUNK --- EMB
