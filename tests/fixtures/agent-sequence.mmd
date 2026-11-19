@@ -1,0 +1,38 @@
+ sequenceDiagram
+      autonumber
+      participant W as Inbound worker
+      participant A as Agent
+      participant DB as SQLite
+      participant L as llama-server (chat)
+      participant E as llama-server (embed)
+      participant T as Telegram
+
+      W->>DB: claim_oldest_inbound (lease)
+      W->>A: handle_inbound_claim
+      A->>DB: assert claim, start/resume trace, save user turn
+      A->>L: (internal) plan_recall, select_task_context, rerank_recall
+      A->>E: embed recall query
+      A->>DB: hybrid search chunks + memories, task context
+      loop each round until plain text
+          A->>A: assert inbound claim still held
+          A->>L: generate(messages, tools, tool_choice=auto)
+          L-->>A: response (stored per round for replay)
+          alt has tool_calls
+              A->>A: guards: no repeated identical call,<br/>cumulative call/byte limits
+              A->>DB: save assistant tool-call turn
+              A->>DB: execute tool + tool-result transcript (atomic)
+              A->>A: append bounded tool result to messages
+          else final content
+              A->>A: trim, qualify Task/Reminder/Memory IDs,<br/>commitment guard (no unbacked "I'll remind you")
+              A->>DB: record_response_output
+          end
+      end
+      A->>E: embed completed exchange chunks
+      A->>DB: prepare_delivery, mark attempting
+      A->>T: sendMessage(text, bold entities)
+      alt sent
+          T-->>A: message_id
+          A->>DB: complete_inbound_delivery_indexed (atomic)
+      else failed
+          A->>DB: fail_delivery, so the claim stays retryable
+      end

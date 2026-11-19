@@ -9,6 +9,7 @@ const bidirectionalFixture = fs.readFileSync(path.join(__dirname, 'fixtures/bidi
 const ethernetFixture = fs.readFileSync(path.join(__dirname, 'fixtures/ethernet-flowchart.mmd'), 'utf8');
 const stateFixture = fs.readFileSync(path.join(__dirname, 'fixtures/task-state.mmd'), 'utf8');
 const ethCoreFixture = fs.readFileSync(path.join(__dirname, 'fixtures/eth-core-flowchart.mmd'), 'utf8');
+const sequenceFixture = fs.readFileSync(path.join(__dirname, 'fixtures/agent-sequence.mmd'), 'utf8');
 const transformerFixture = fs.readFileSync(path.join(__dirname, 'fixtures/transformer-flowchart.mmd'), 'utf8');
 let checked = 0;
 function verify(source) {
@@ -292,5 +293,36 @@ for (const edge of renderedEdges) {
   assert.equal(edge.attrs.opacity, 1);
   assert.equal(edge.attrs[edge.tag === 'path' ? 'stroke' : 'fill'], edge.tag === 'path' ? '#637c9c' : '#c3d5ec');
   if (edge.tag === 'path') assert.equal(edge.attrs['marker-end'], 'url(#arrow)');
+}
+{
+  const seq = buildGraph(sequenceFixture);
+  assert.equal(seq.type, 'sequence');
+  assert.deepEqual(seq.nodes.map(v => v.label), ['Inbound worker', 'Agent', 'SQLite', 'llama-server (chat)', 'llama-server (embed)', 'Telegram']);
+  assert.equal(seq.edges.length, 21);
+  assert.deepEqual(seq.edges.map(e => e.number), Array.from({ length: 21 }, (_, i) => i + 1));
+  assert.equal(seq.edges[8].dotted, true, 'L-->>A is a dotted reply');
+  assert.equal(seq.edges[9].label, 'guards: no repeated identical call,\ncumulative call/byte limits');
+  assert.equal(seq.edges[13].label.split('\n')[1], 'commitment guard (no unbacked "I\'ll remind you")');
+  assert.deepEqual(seq.subgraphs.map(f => f.label), ['loop [each round until plain text]', 'alt [has tool_calls]', 'alt [sent]']);
+  assert.deepEqual(seq.dividers.map(d => d.label), ['[final content]', '[failed]']);
+  const inside = (inner, outer) => inner.x > outer.x && inner.y > outer.y && inner.x + inner.w < outer.x + outer.w && inner.y + inner.h < outer.y + outer.h;
+  assert(inside(seq.subgraphs[1], seq.subgraphs[0]), 'Nested alt must sit inside the loop frame');
+  // Messages 7-15 are inside the loop, 10-15 inside the nested alt, 19-21 inside the last alt.
+  const within = (e, f) => e.points.every(p => p.x > f.x && p.x < f.x + f.w && p.y > f.y && p.y < f.y + f.h);
+  seq.edges.forEach((e, i) => {
+    assert.equal(within(e, seq.subgraphs[0]), i >= 6 && i <= 14, 'loop membership of message ' + (i + 1));
+    assert.equal(within(e, seq.subgraphs[1]), i >= 9 && i <= 14, 'alt membership of message ' + (i + 1));
+    assert.equal(within(e, seq.subgraphs[2]), i >= 18, 'alt membership of message ' + (i + 1));
+    if (i) assert(e.points[0].y > seq.edges[i - 1].points.at(-1).y, 'Messages flow downward');
+  });
+  for (let i = 1; i < seq.nodes.length; i++) assert(seq.nodes[i].x > seq.nodes[i - 1].x + seq.nodes[i - 1].w, 'Participants must not overlap');
+  for (const v of [...seq.nodes, ...seq.subgraphs]) assert(v.x >= 0 && v.x + v.w <= seq.width && v.y >= 0 && v.y + v.h <= seq.height);
+  const noted = buildGraph('sequenceDiagram\n  actor U\n  U->>U: think\n  Note over U,S: spans both\n  opt maybe\n    S--)U: async\n  end');
+  assert.equal(noted.nodes[0].shape, 'round');
+  assert.equal(noted.notes.length, 1);
+  assert(noted.notes[0].x < noted.lifelines[0].x && noted.notes[0].x + noted.notes[0].w > noted.lifelines[1].x);
+  assert.throws(() => buildGraph('sequenceDiagram\n  loop x\n  A->>B: hi'), /Line 2: Unclosed loop/);
+  assert.throws(() => buildGraph('sequenceDiagram\n  A->>B: hi\n  else no'), /Line 3: else is only valid inside alt/);
+  assert.throws(() => buildGraph('sequenceDiagram\n  box Purple\n  end'), /Line 2: Unsupported sequence diagram syntax/);
 }
 console.log(`Passed: ${checked} orthogonal segments avoid every block, across all directions, feedback cycles, self-loops, long edges, and varying node sizes.`);

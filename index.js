@@ -47,13 +47,151 @@ function buildGraph(source) {
       return value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff) ? String.fromCodePoint(value) : entity;
     })).join('\n');
   }
+  // Sequence diagrams use their own layout: participants in columns,
+  // messages in rows, and loop/alt/opt/par/critical/break frames around rows.
+  function sequenceGraph(start) {
+    const participants = [], pids = new Map(), statements = [], stack = [];
+    const ID = '[A-Za-z0-9_]+';
+    let numbering = null;
+    function participant(id, label, actor) {
+      if (!pids.has(id)) { pids.set(id, participants.length); participants.push({ id, label: id, shape: 'rect' }); }
+      const v = participants[pids.get(id)];
+      if (label !== undefined) v.label = label;
+      if (actor) v.shape = 'round';
+      return pids.get(id);
+    }
+    const sections = { else: 'alt', and: 'par', option: 'critical' };
+    for (let li = start; li < lines.length; li++) {
+      const body = lines[li].split('%%')[0].trim().replace(/;$/, '').trim(), line = li + 1;
+      if (!body) continue;
+      let m;
+      if ((m = body.match(new RegExp(`^(participant|actor)\\s+(${ID})(?:\\s+as\\s+(.+))?$`)))) {
+        participant(m[2], m[3] === undefined ? undefined : decodeLabel(unquote(m[3].trim())), m[1] === 'actor');
+      } else if ((m = body.match(/^autonumber(?:\s+(off)|\s+(\d+)(?:\s+(\d+))?)?$/))) {
+        numbering = m[1] ? null : { next: Number(m[2] ?? 1), step: Number(m[3] ?? 1) };
+      } else if ((m = body.match(new RegExp(`^(?:de)?activate\\s+(${ID})$`)))) {
+        participant(m[1]);
+      } else if ((m = body.match(/^(loop|alt|opt|par|critical|break)(?:\s+(.*))?$/))) {
+        const block = { kind: m[1], label: decodeLabel((m[2] || '').trim()).replace(/\n/g, ' '), line };
+        statements.push({ type: 'open', block }); stack.push(block);
+      } else if ((m = body.match(/^(else|and|option)(?:\s+(.*))?$/))) {
+        if (stack.at(-1)?.kind !== sections[m[1]]) fail(line, m[1] + ' is only valid inside ' + sections[m[1]] + '.');
+        statements.push({ type: 'section', label: decodeLabel((m[2] || '').trim()).replace(/\n/g, ' ') });
+      } else if (body === 'end') {
+        if (!stack.length) fail(line, 'Unexpected end.');
+        stack.pop(); statements.push({ type: 'close' });
+      } else if ((m = body.match(new RegExp(`^note\\s+(left of|right of|over)\\s+(${ID})(?:\\s*,\\s*(${ID}))?\\s*:\\s*(.*)$`, 'i')))) {
+        const place = m[1].toLowerCase().replace(/\s+/g, ' ');
+        if (m[3] && place !== 'over') fail(line, 'Only "Note over" accepts two participants.');
+        const a = participant(m[2]), b = m[3] ? participant(m[3]) : a;
+        statements.push({ type: 'note', place, a: Math.min(a, b), b: Math.max(a, b), text: decodeLabel(m[4].trim()) });
+      } else if ((m = body.match(new RegExp(`^(${ID})\\s*(<<-->>|<<->>|-->>|->>|--x|-x|--\\)|-\\)|-->|->)\\s*[+-]?\\s*(${ID})\\s*(?::\\s*(.*))?$`)))) {
+        const kind = m[2], edge = {
+          from: participant(m[1]), to: participant(m[3]), label: decodeLabel((m[4] || '').trim()),
+          arrow: kind !== '->' && kind !== '-->', startArrow: kind.startsWith('<<'), dotted: kind.includes('--')
+        };
+        if (numbering) { edge.number = numbering.next; numbering.next += numbering.step; }
+        edges.push(edge); statements.push({ type: 'message', edge });
+        if (edges.length > maxEdges) fail(line, 'Edge count exceeds maxEdges (' + maxEdges + ').');
+      } else {
+        fail(line, 'Unsupported sequence diagram syntax near ' + body.slice(0, 60));
+      }
+    }
+    if (stack.length) fail(stack[0].line, 'Unclosed ' + stack[0].kind + ' block. Expected end.');
+    if (!participants.length) throw new Error('Enter at least one participant or message.');
+    // Text is not measured in the worker, so widths use average glyph sizes.
+    const chars = text => Math.max(0, ...text.split('\n').map(l => Array.from(l).length));
+    const labelWidth = text => chars(text) * 6.6, n = participants.length;
+    for (const v of participants) {
+      v.lines = v.label.split('\n');
+      v.w = Math.max(120, chars(v.label) * 7.5 + 32); v.h = Math.max(48, v.lines.length * 17 + 22);
+    }
+    const headerHeight = Math.max(...participants.map(v => v.h));
+    for (const v of participants) v.h = headerHeight;
+    // Column centers grow left to right until every label between two
+    // lifelines fits between them.
+    const gaps = Array.from({ length: n }, () => []);
+    const need = (a, b, dist) => { if (a > b) [a, b] = [b, a]; if (a !== b && a >= 0 && b < n) gaps[b].push({ from: a, dist }); };
+    for (let j = 1; j < n; j++) need(j - 1, j, (participants[j - 1].w + participants[j].w) / 2 + 40);
+    const noteSize = text => ({ w: Math.max(80, chars(text) * 7 + 24), h: text.split('\n').length * 16 + 16 });
+    for (const s of statements) {
+      if (s.type === 'message') {
+        const e = s.edge, extra = e.number !== undefined ? 24 : 0;
+        if (e.from !== e.to) need(e.from, e.to, labelWidth(e.label) + 40 + extra);
+        else need(e.from, e.from + 1, Math.max(labelWidth(e.label) + 8, 32) + 24 + extra);
+      } else if (s.type === 'note') {
+        const { w } = noteSize(s.text);
+        if (s.place === 'right of') need(s.a, s.a + 1, w + 36);
+        else if (s.place === 'left of') need(s.a - 1, s.a, w + 36);
+        else if (s.a !== s.b) need(s.a, s.b, w - 60);
+      }
+    }
+    const center = new Float64Array(n);
+    for (let j = 1; j < n; j++) for (const g of gaps[j]) center[j] = Math.max(center[j], center[g.from] + g.dist);
+    participants.forEach((v, i) => { v.x = center[i] - v.w / 2; v.y = 40; v.rank = 0; });
+    const frames = [], dividers = [], notes = [], open = [];
+    let y = 40 + headerHeight + 28;
+    const extend = (x1, x2) => { for (const f of open) { f.minX = Math.min(f.minX, x1); f.maxX = Math.max(f.maxX, x2); } };
+    for (const s of statements) {
+      if (s.type === 'open') {
+        const frame = { id: s.block.kind + '-' + frames.length, label: s.block.kind + (s.block.label ? ' [' + s.block.label + ']' : ''), y, minX: Infinity, maxX: -Infinity, inner: 0, sections: [] };
+        frames.push(frame); open.push(frame); y += 44;
+      } else if (s.type === 'section') {
+        open.at(-1).sections.push({ y: y + 2, label: s.label ? '[' + s.label + ']' : '' }); y += 36;
+      } else if (s.type === 'close') {
+        const frame = open.pop(), parent = open.at(-1);
+        if (frame.minX > frame.maxX) { frame.minX = center[0]; frame.maxX = center[n - 1]; extend(frame.minX, frame.maxX); }
+        if (parent) parent.inner = Math.max(parent.inner, frame.inner + 1);
+        const pad = 20 + 14 * frame.inner;
+        frame.x = frame.minX - pad; frame.h = y - frame.y; frame.w = frame.maxX - frame.minX + 2 * pad;
+        const textWidth = Math.max(chars(frame.label) * 7.5, ...frame.sections.map(d => chars(d.label) * 7)) + 32;
+        if (frame.w < textWidth) frame.w = textWidth;
+        for (const d of frame.sections) dividers.push({ x1: frame.x, x2: frame.x + frame.w, y: d.y, label: d.label });
+        extend(frame.x, frame.x + frame.w);
+        y += 18;
+      } else if (s.type === 'note') {
+        const { w, h } = noteSize(s.text), a = center[s.a], b = center[s.b];
+        let x = s.place === 'right of' ? a + 12 : s.place === 'left of' ? a - 12 - w : (a + b) / 2 - w / 2, width = w;
+        if (s.place === 'over' && s.a !== s.b && b - a + 60 > w) { x = a - 30; width = b - a + 60; }
+        notes.push({ x, y, w: width, h, lines: s.text.split('\n') });
+        extend(x, x + width); y += h + 16;
+      } else {
+        const e = s.edge, a = center[e.from], b = center[e.to], lines = e.label ? e.label.split('\n').length : 0;
+        y += lines * 13 + 6;
+        if (e.from === e.to) {
+          e.points = [{ x: a, y }, { x: a + 32, y }, { x: a + 32, y: y + 24 }, { x: a, y: y + 24 }];
+          e.labelX = a + 8 + (e.number !== undefined ? 14 : 0); e.labelAnchor = 'start';
+          extend(a, a + Math.max(labelWidth(e.label) + 8, 32) + 12);
+        } else {
+          e.points = [{ x: a, y }, { x: b, y }];
+          e.labelX = (a + b) / 2;
+          extend(Math.min(a, b), Math.max(a, b));
+        }
+        e.labelY = y;
+        y += e.from === e.to ? 44 : 20;
+      }
+    }
+    const bottom = y + 8;
+    const lifelines = participants.map((v, i) => ({ x: center[i], y1: v.y + v.h, y2: bottom }));
+    // Shift everything right so frames and notes left of the first column fit.
+    const left = Math.min(...participants.map(v => v.x), ...frames.map(f => f.x), ...notes.map(v => v.x));
+    const right = Math.max(...participants.map(v => v.x + v.w), ...frames.map(f => f.x + f.w), ...notes.map(v => v.x + v.w), ...edges.map(e => e.from === e.to ? e.labelX + labelWidth(e.label) + 20 : 0));
+    const dx = 40 - left;
+    for (const v of [...participants, ...frames, ...notes]) v.x += dx;
+    for (const e of edges) { e.labelX += dx; for (const p of e.points) p.x += dx; }
+    for (const l of lifelines) l.x += dx;
+    for (const d of dividers) { d.x1 += dx; d.x2 += dx; }
+    for (const f of frames) { delete f.minX; delete f.maxX; delete f.inner; delete f.sections; }
+    return { type: 'sequence', nodes: participants, edges, subgraphs: frames, notes, lifelines, dividers, direction: 'TB', width: right + dx + 40, height: bottom + 40 };
+  }
   for (let li = first; li < lines.length; li++) {
     const text = lines[li]; let p = 0;
     const skip = () => { while (/\s/.test(text[p] || '') && p < text.length) p++; };
     skip(); if (!text.slice(p) || text.startsWith('%%', p)) continue;
     if (!direction) {
+      if (/^sequenceDiagram\s*(?:;|%%|$)/.test(text.slice(p))) return sequenceGraph(li + 1);
       const h = text.slice(p).match(/^(?:(?:flowchart|graph)\s+(LR|RL|TB|TD|BT)|(stateDiagram-v2))\s*(?=;|%%|$)/);
-      if (!h) fail(li + 1, 'Expected flowchart LR (or RL, TB, TD, BT) or stateDiagram-v2.');
+      if (!h) fail(li + 1, 'Expected flowchart LR (or RL, TB, TD, BT), stateDiagram-v2, or sequenceDiagram.');
       stateDiagram = Boolean(h[2]);
       direction = stateDiagram || h[1] === 'TD' ? 'TB' : h[1]; p += h[0].length;
     }
@@ -463,6 +601,11 @@ flowchart LR
       g.append(el('text', { x: group.x + 14, y: group.y + 25, fill: group.style?.color || '#dce5f3', 'font-size': 14 }, group.label));
       groups.append(g);
     }
+    for (const d of graph.dividers || []) {
+      groups.append(el('line', { x1: d.x1, x2: d.x2, y1: d.y, y2: d.y, stroke: '#536780', 'stroke-width': 1.3, 'stroke-dasharray': '6 4' }));
+      if (d.label) groups.append(el('text', { x: d.x1 + 14, y: d.y + 22, fill: '#dce5f3', 'font-size': 13 }, d.label));
+    }
+    for (const l of graph.lifelines || []) groups.append(el('line', { x1: l.x, x2: l.x, y1: l.y1, y2: l.y2, stroke: '#4d6280', 'stroke-width': 1.2, 'stroke-dasharray': '4 4' }));
     fragment.append(groups);
     const edgeGroup = el('g', { fill: 'none', stroke: '#637c9c', 'stroke-width': 1.4, 'stroke-linejoin': 'miter' }), labels = el('g'), nodeGroup = el('g');
     graph.edges.forEach((e, edgeIndex) => {
@@ -471,10 +614,21 @@ flowchart LR
       if (e.label) {
         // Multi-line labels grow upward so the last line keeps its place above the segment.
         const lines = e.label.split('\n');
-        const text = el('text', { 'data-edge': edgeIndex, x: e.labelX, y: e.labelY - 6 - (lines.length - 1) * 13, fill: '#c3d5ec', 'font-size': 11, 'text-anchor': 'middle', stroke: '#10141c', 'stroke-width': 4, 'paint-order': 'stroke', 'stroke-linejoin': 'round' });
+        const text = el('text', { 'data-edge': edgeIndex, x: e.labelX, y: e.labelY - 6 - (lines.length - 1) * 13, fill: '#c3d5ec', 'font-size': 11, 'text-anchor': e.labelAnchor || 'middle', stroke: '#10141c', 'stroke-width': 4, 'paint-order': 'stroke', 'stroke-linejoin': 'round' });
         lines.forEach((line, i) => text.append(el('tspan', { x: e.labelX, dy: i ? 13 : 0 }, line))); labels.append(text);
       }
+      if (e.number !== undefined) {
+        // Autonumber badges sit on the sender's lifeline.
+        const p = e.points[0];
+        labels.append(el('circle', { cx: p.x, cy: p.y, r: 9, fill: '#87a9d7' }), el('text', { x: p.x, y: p.y + 4, fill: '#10141c', 'font-size': 10, 'font-weight': 700, 'text-anchor': 'middle' }, String(e.number)));
+      }
     });
+    for (const note of graph.notes || []) {
+      const g = el('g');
+      g.append(el('rect', { x: note.x, y: note.y, width: note.w, height: note.h, rx: 4, fill: '#3a3424', stroke: '#b49a5a', 'stroke-width': 1.2 }));
+      const text = el('text', { x: note.x + note.w / 2, y: note.y + 20, fill: '#f1e6c8', 'font-size': 12, 'text-anchor': 'middle' });
+      note.lines.forEach((line, i) => text.append(el('tspan', { x: note.x + note.w / 2, dy: i ? 16 : 0 }, line))); g.append(text); labels.append(g);
+    }
     for (const [i, v] of graph.nodes.entries()) {
       const g = el('g', { 'data-node': i, tabindex: 0, role: 'button', 'aria-label': v.id + ': ' + v.label + '. Highlight connections', 'aria-pressed': 'false', style: 'cursor: pointer' }); g.append(el('title', {}, v.id + ': ' + v.label));
       const attrs = { fill: v.style?.fill || '#202f44', stroke: v.style?.stroke || '#87a9d7', 'stroke-width': 1.3 };

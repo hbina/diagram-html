@@ -24,7 +24,7 @@
           class="spacer"></span><button id="example">Example</button></div>
       <details id="syntaxHelp">
         <summary>Supported syntax &amp; limits</summary>
-        <p>A custom parser, supporting a subset of Mermaid flowchart and state diagram syntax. No Mermaid library is used.</p>
+        <p>A custom parser, supporting a subset of Mermaid flowchart, state diagram and sequence diagram syntax. No Mermaid library is used.</p>
         <p><code>flowchart LR</code> or <code>graph TB</code>; directions LR, RL, TB, TD, BT. Nodes:
           <code>a[Label]</code>, <code>a("Label")</code>, <code>a(("Circle"))</code>, <code>a[("Database")]</code>, <code>a{Decision}</code>, or bare IDs. Edges:
           <code>a --&gt; b</code>, <code>a &lt;--&gt; b</code>, <code>a --&gt;|label| b</code>, <code>a -- "label" --&gt; b</code>, <code>a --- b</code>,
@@ -48,6 +48,14 @@
           Use one state statement per line. Transition labels may contain semicolons and numeric Mermaid entities such as
           <code>#58;</code> for a colon. The default direction is TB; <code>direction LR</code> (or RL, TB, TD, BT) is accepted.
           Composite states, notes, state styling, and other diagram types are unsupported and report errors.</p>
+        <p><code>sequenceDiagram</code> supports <code>participant ID as Label</code>, <code>actor ID</code>,
+          <code>autonumber</code>, messages such as <code>a-&gt;&gt;b: text</code>, <code>a--&gt;&gt;b</code>,
+          <code>a-&gt;b</code>, <code>a--&gt;b</code>, <code>a-x b</code>, <code>a-)b</code> and <code>a&lt;&lt;-&gt;&gt;b</code>
+          (cross and async heads draw as plain arrows), self messages, <code>Note left of / right of / over a,b: text</code>,
+          and <code>loop</code>, <code>opt</code>, <code>break</code>, <code>alt</code>/<code>else</code>,
+          <code>par</code>/<code>and</code> and <code>critical</code>/<code>option</code> blocks ending with
+          <code>end</code>. Activation (<code>+</code>/<code>-</code>, <code>activate</code>) is accepted but not drawn.
+          Use one statement per line; <code>box</code>, <code>rect</code> and other directives report errors.</p>
         <p>Defaults: 20,000 edges, 1,000,000 source characters. Layout uses layers, including cycle grouping.
           Connections use right-angle turns and route around blocks. Inputs merge on the leading side of each block;
           outputs share a separate line on the trailing side, including feedback connections. Dense
