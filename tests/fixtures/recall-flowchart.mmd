@@ -1,0 +1,35 @@
+ flowchart TD
+      Q["Your message + reply data + recent messages"] --> PLAN
+      PLAN["plan_recall<br/>chat LLM, forced tool call<br/>→ semantic_query + up to 12 keywords<br/>(contract failure → raw message, no
+  keywords)"]
+
+      PLAN --> EMBQ["embedding llama-server /v1/embeddings<br/>'task: search result | query: …'"]
+      PLAN --> FTS["safe_fts_query(keywords)"]
+
+      subgraph CONV["Conversation recall (gateway/rag.rs retrieve_detailed)"]
+          V1["Load ALL stored chunk vectors from SQLite<br/>brute-force dot product in Rust<br/>keep if ≥ minScore (default 0.35)"]
+          K1["SQLite FTS5 conversation_fts MATCH<br/>ORDER BY bm25, top 48<br/>keyword_score = 1/rank"]
+          C1["combined = 0.65·vector + 0.35·keyword<br/>sort, then binary-search how many fit the token budget"]
+          V1 --> C1
+          K1 --> C1
+      end
+
+      subgraph MEMS["Memory recall (memory.rs search → state/memory.rs)"]
+          V2["dot product over active memory embeddings"]
+          K2["memory_fts MATCH"]
+          C2["same 0.65 / 0.35 blend, top 20<br/>minus profile memories already in the core"]
+          V2 --> C2
+          K2 --> C2
+      end
+
+      EMBQ --> V1
+      EMBQ --> V2
+      FTS --> K1
+      FTS --> K2
+
+      C1 --> RR
+      C2 --> RR
+      RR["rerank_recall<br/>chat LLM, forced tool select_recall_evidence<br/>sees candidates + scores, returns ≤ 8 IDs in order<br/>unknown /
+  duplicate IDs → error"]
+      RR --> OUT["Rendered as 'Saved memory …' and<br/>'Relevant prior conversations …' (labelled not instructions)<br/>added only if it fits
+  the budget"]

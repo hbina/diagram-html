@@ -10,6 +10,7 @@ const ethernetFixture = fs.readFileSync(path.join(__dirname, 'fixtures/ethernet-
 const stateFixture = fs.readFileSync(path.join(__dirname, 'fixtures/task-state.mmd'), 'utf8');
 const ethCoreFixture = fs.readFileSync(path.join(__dirname, 'fixtures/eth-core-flowchart.mmd'), 'utf8');
 const sequenceFixture = fs.readFileSync(path.join(__dirname, 'fixtures/agent-sequence.mmd'), 'utf8');
+const recallFixture = fs.readFileSync(path.join(__dirname, 'fixtures/recall-flowchart.mmd'), 'utf8');
 const transformerFixture = fs.readFileSync(path.join(__dirname, 'fixtures/transformer-flowchart.mmd'), 'utf8');
 let checked = 0;
 function verify(source) {
@@ -324,5 +325,14 @@ for (const edge of renderedEdges) {
   assert.throws(() => buildGraph('sequenceDiagram\n  loop x\n  A->>B: hi'), /Line 2: Unclosed loop/);
   assert.throws(() => buildGraph('sequenceDiagram\n  A->>B: hi\n  else no'), /Line 3: else is only valid inside alt/);
   assert.throws(() => buildGraph('sequenceDiagram\n  box Purple\n  end'), /Line 2: Unsupported sequence diagram syntax/);
+}
+{
+  // Quoted labels may continue on the next line; the break reads as a space.
+  const recall = verify(recallFixture);
+  assert.equal(recall.nodes.length, 12);
+  assert.equal(recall.edges.length, 14);
+  assert.equal(recall.nodes.find(v => v.id === 'PLAN').label.split('\n').at(-1), '(contract failure → raw message, no keywords)');
+  assert.equal(recall.nodes.find(v => v.id === 'RR').label.split('\n').at(-1), 'unknown / duplicate IDs → error');
+  assert.throws(() => buildGraph('flowchart LR\n  a["open\n  b --> c'), /Line 2: Unclosed quoted label/);
 }
 console.log(`Passed: ${checked} orthogonal segments avoid every block, across all directions, feedback cycles, self-loops, long edges, and varying node sizes.`);

@@ -185,7 +185,7 @@ function buildGraph(source) {
     return { type: 'sequence', nodes: participants, edges, subgraphs: frames, notes, lifelines, dividers, direction: 'TB', width: right + dx + 40, height: bottom + 40 };
   }
   for (let li = first; li < lines.length; li++) {
-    const text = lines[li]; let p = 0;
+    let text = lines[li], p = 0;
     const skip = () => { while (/\s/.test(text[p] || '') && p < text.length) p++; };
     skip(); if (!text.slice(p) || text.startsWith('%%', p)) continue;
     if (!direction) {
@@ -223,13 +223,20 @@ function buildGraph(source) {
     function readLabel(close) {
       skip(); let result = '';
       if (text[p] === '"') {
-        p++; let closed = false;
-        while (p < text.length) {
+        p++; let closed = false; const startLine = li + 1;
+        for (;;) {
+          // A quoted label may continue on the following lines; the line
+          // break is read as a space, as in Mermaid.
+          if (p >= text.length) {
+            if (li + 1 >= lines.length) break;
+            text += ' ' + lines[++li].trim(); result = result.trimEnd() + ' '; p++;
+            continue;
+          }
           if (text[p] === '\\' && (text[p + 1] === '"' || text[p + 1] === '\\')) { result += text[p + 1]; p += 2; }
           else if (text[p] === '"') { p++; closed = true; break; }
           else result += text[p++];
         }
-        if (!closed) fail(li + 1, 'Unclosed quoted label.');
+        if (!closed) fail(startLine, 'Unclosed quoted label.');
         skip();
       } else {
         const start = p;

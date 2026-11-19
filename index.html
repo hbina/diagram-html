@@ -33,7 +33,7 @@
           statements with newlines or semicolons. IDs use letters, numbers, underscores or hyphens.
         </p>
         <p><code>%%</code> comments and a leading YAML header with <code>maxEdges</code> / <code>maxTextSize</code> are
-          accepted. Other header entries are ignored. Labels are plain text; quoted labels can contain punctuation. Node
+          accepted. Other header entries are ignored. Labels are plain text; quoted labels can contain punctuation and may continue onto the next line (the break reads as a space). Node
           and edge labels support <code>&lt;br/&gt;</code>, <code>&lt;/br&gt;</code> and <code>\n</code> line breaks, and
           entities such as <code>&amp;lt;</code> or <code>#lt;</code>.
           Quoted edge labels are supported. Group nodes with <code>subgraph ID["Label"]</code> and
